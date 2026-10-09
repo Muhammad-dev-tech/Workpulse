@@ -152,7 +152,7 @@ let departments: Department[] = [
   {
     id: 'dept-fin',
     organizationId: 'org-acme-1',
-    name: 'Finance & Accounting',
+    name: 'Finance and Accounting',
     code: 'FIN',
     description: 'Budget allocations, expense reimbursements, purchase order verification, and financial audits.',
     managerId: 'user-sarah',
@@ -178,7 +178,7 @@ let departments: Department[] = [
   {
     id: 'dept-proc',
     organizationId: 'org-acme-1',
-    name: 'Procurement & Supply Chain',
+    name: 'Procurement and Supply Chain',
     code: 'PROC',
     description: 'Vendor relationship management, asset sourcing, hardware quotes, and contract fulfillment.',
     managerId: 'user-ibrahim',
@@ -209,43 +209,43 @@ let workflows: WorkflowTemplate[] = [
   {
     id: 'wf-it-support',
     organizationId: 'org-acme-1',
-    name: 'IT Technical Support & Provisioning',
+    name: 'IT Technical Support and Provisioning',
     description: 'Employee submits request -> IT Manager reviews -> Task assigned to technician -> Technician works -> Manager verifies -> Request completed.',
     departmentId: 'dept-it',
     createdAt: '2026-01-01T00:00:00Z',
     steps: [
       { id: 'step-it-1', templateId: 'wf-it-support', stepOrder: 1, name: 'Employee Submission', slaHours: 2 },
-      { id: 'step-it-2', templateId: 'wf-it-support', stepOrder: 2, name: 'IT Manager Review & Task Assignment', departmentId: 'dept-it', requiredRole: 'MANAGER', slaHours: 12 },
-      { id: 'step-it-3', templateId: 'wf-it-support', stepOrder: 3, name: 'Technician Work & Resolution', departmentId: 'dept-it', requiredRole: 'EMPLOYEE', slaHours: 24 },
+      { id: 'step-it-2', templateId: 'wf-it-support', stepOrder: 2, name: 'IT Manager Review and Task Assignment', departmentId: 'dept-it', requiredRole: 'MANAGER', slaHours: 12 },
+      { id: 'step-it-3', templateId: 'wf-it-support', stepOrder: 3, name: 'Technician Work and Resolution', departmentId: 'dept-it', requiredRole: 'EMPLOYEE', slaHours: 24 },
       { id: 'step-it-4', templateId: 'wf-it-support', stepOrder: 4, name: 'Manager Final Verification', departmentId: 'dept-it', requiredRole: 'MANAGER', requiresApproval: true, slaHours: 12 }
     ]
   },
   {
     id: 'wf-hardware',
     organizationId: 'org-acme-1',
-    name: 'Hardware Procurement & Replacement',
+    name: 'Hardware Procurement and Replacement',
     description: 'Multi-stage workflow for device replacement, quotation, finance authorization, and delivery.',
     departmentId: 'dept-proc',
     createdAt: '2026-01-01T00:00:00Z',
     steps: [
       { id: 'step-hw-1', templateId: 'wf-hardware', stepOrder: 1, name: 'Manager Approval', requiredRole: 'MANAGER', requiresApproval: true, slaHours: 24 },
       { id: 'step-hw-2', templateId: 'wf-hardware', stepOrder: 2, name: 'IT Technical Assessment', departmentId: 'dept-it', slaHours: 12 },
-      { id: 'step-hw-3', templateId: 'wf-hardware', stepOrder: 3, name: 'Procurement & Quotation', departmentId: 'dept-proc', slaHours: 48 },
+      { id: 'step-hw-3', templateId: 'wf-hardware', stepOrder: 3, name: 'Procurement and Quotation', departmentId: 'dept-proc', slaHours: 48 },
       { id: 'step-hw-4', templateId: 'wf-hardware', stepOrder: 4, name: 'Finance PO Approval', departmentId: 'dept-fin', requiredRole: 'MANAGER', requiresApproval: true, slaHours: 24 },
-      { id: 'step-hw-5', templateId: 'wf-hardware', stepOrder: 5, name: 'Vendor Delivery & Setup', departmentId: 'dept-it', slaHours: 48 }
+      { id: 'step-hw-5', templateId: 'wf-hardware', stepOrder: 5, name: 'Vendor Delivery and Setup', departmentId: 'dept-it', slaHours: 48 }
     ]
   },
   {
     id: 'wf-expense',
     organizationId: 'org-acme-1',
-    name: 'Expense Reimbursement & Invoice Approval',
+    name: 'Expense Reimbursement and Invoice Approval',
     description: 'Employee submit receipts -> Manager check -> Finance approval -> Wire transfer.',
     departmentId: 'dept-fin',
     createdAt: '2026-01-01T00:00:00Z',
     steps: [
       { id: 'step-ex-1', templateId: 'wf-expense', stepOrder: 1, name: 'Receipt Submission', slaHours: 24 },
       { id: 'step-ex-2', templateId: 'wf-expense', stepOrder: 2, name: 'Department Review', requiredRole: 'MANAGER', requiresApproval: true, slaHours: 48 },
-      { id: 'step-ex-3', templateId: 'wf-expense', stepOrder: 3, name: 'Finance Audit & Wire Transfer', departmentId: 'dept-fin', requiredRole: 'MANAGER', slaHours: 72 }
+      { id: 'step-ex-3', templateId: 'wf-expense', stepOrder: 3, name: 'Finance Audit and Wire Transfer', departmentId: 'dept-fin', requiredRole: 'MANAGER', slaHours: 72 }
     ]
   }
 ];
@@ -256,10 +256,10 @@ let tasks: TaskItem[] = [
     id: 'task-uuid-201',
     taskId: 'TSK-201',
     requestId: 'REQ-1001',
-    requestTitle: 'Software Installation - JetBrains & Docker Suite',
+    requestTitle: 'Software Installation - JetBrains and Docker Suite',
     organizationId: 'org-acme-1',
     departmentId: 'dept-it',
-    title: 'Install and configure Docker Engine & IntelliJ License',
+    title: 'Install and configure Docker Engine and IntelliJ License',
     description: 'Provision Enterprise JetBrains license key and configure Docker Desktop daemon with proxy settings.',
     taskType: 'Install software',
     assigneeId: 'user-ahmed',
@@ -305,11 +305,11 @@ let requests: RequestItem[] = [
     requestTypeId: 'rt-it-1',
     requestTypeName: 'Software Installation',
     currentStepId: 'step-it-3',
-    currentStepName: 'Technician Work & Resolution',
+    currentStepName: 'Technician Work and Resolution',
     workflowTemplateId: 'wf-it-support',
     assigneeId: 'user-ahmed',
     assigneeName: 'Ahmed Khan',
-    title: 'Software Installation - JetBrains & Docker Suite',
+    title: 'Software Installation - JetBrains and Docker Suite',
     description: 'Requires local container runtime and IntelliJ Ultimate for upcoming microservices refactoring sprint.',
     priority: 'HIGH',
     status: 'ACTIVE',
@@ -467,16 +467,16 @@ let requests: RequestItem[] = [
     requesterId: 'user-sarah',
     requesterName: 'Sarah Connor',
     departmentId: 'dept-fin',
-    departmentName: 'Finance & Accounting',
+    departmentName: 'Finance and Accounting',
     requestTypeId: 'rt-fin-2',
     requestTypeName: 'Purchase Order Approval',
     currentStepId: 'step-ex-3',
-    currentStepName: 'Finance Audit & Wire Transfer',
+    currentStepName: 'Finance Audit and Wire Transfer',
     workflowTemplateId: 'wf-expense',
     assigneeId: 'user-sarah',
     assigneeName: 'Sarah Connor',
     title: 'Quarterly Cloud Infrastructure Expense Reimbursement',
-    description: 'Internal financial audit and budget reconciliation for quarterly AWS & GCP enterprise billing.',
+    description: 'Internal financial audit and budget reconciliation for quarterly AWS and GCP enterprise billing.',
     priority: 'HIGH',
     status: 'ACTIVE',
     dueDate: '2026-10-10T18:00:00Z',

@@ -202,9 +202,11 @@ export class PulseAiService {
       if (!canUserAccessDepartment(user, dept.id)) {
         await auditRepository.logAiAction(organizationId, user.id, toolName, toolArgs, false,
           `DENIED: ${user.name} attempted to access ${dept.name} queue`);
+        const userDeptName = (allDepts.find(d => d.id === user.departmentId)?.name || 'General').replace(/&/g, 'and');
+        const targetDeptName = dept.name.replace(/&/g, 'and');
         return {
           result: null,
-          error: `PERMISSION_DENIED: You (${user.role} in ${allDepts.find(d => d.id === user.departmentId)?.name || 'General'}) do not have authorization to access the ${dept.name} department queue. WorkPulse enforces strict department isolation.`
+          error: `Access Denied: You (${user.role} in ${userDeptName}) do not have authorization to access the ${targetDeptName} department queue. WorkPulse enforces strict department isolation.`
         };
       }
       const requests = await requestRepository.findAll(organizationId, { departmentId: dept.id });
@@ -313,13 +315,14 @@ export class PulseAiService {
     if (toolName === 'get_department_knowledge') {
       const { query: kq } = toolArgs;
       const allDepts = await departmentRepository.findAll(organizationId);
-      const kqLower = kq.toLowerCase();
+      const kqLower = (kq || '').toLowerCase();
       const matches = allDepts.filter(d =>
-        d.responsibilities.some(r => r.toLowerCase().includes(kqLower)) ||
-        d.requestTypes.some(rt => rt.name.toLowerCase().includes(kqLower)) ||
-        d.name.toLowerCase().includes(kqLower) ||
-        d.code.toLowerCase().includes(kqLower) ||
-        d.description.toLowerCase().includes(kqLower)
+        kqLower.includes(d.name.toLowerCase()) ||
+        kqLower.includes(d.code.toLowerCase()) ||
+        (d.code === 'IT' && (kqLower.includes('it ') || kqLower.includes(' it') || kqLower.includes('tech'))) ||
+        d.responsibilities.some(r => kqLower.includes(r.toLowerCase()) || r.toLowerCase().includes(kqLower)) ||
+        d.requestTypes.some(rt => kqLower.includes(rt.name.toLowerCase()) || rt.name.toLowerCase().includes(kqLower)) ||
+        kqLower.includes(d.description.toLowerCase())
       );
       await auditRepository.logAiAction(organizationId, user.id, toolName, toolArgs, true, 'Answered knowledge query');
       return {
@@ -378,14 +381,40 @@ export class PulseAiService {
     query: string,
     conversationHistory: { role: 'user' | 'assistant'; content: string }[] = []
   ): Promise<PulseAiResponse> {
+    let response: PulseAiResponse;
 
     // ── Gemini path ────────────────────────────────────────────
     if (this.useGemini && this.genai) {
-      return this.processWithGemini(user, organizationId, query, conversationHistory);
+      response = await this.processWithGemini(user, organizationId, query, conversationHistory);
+    } else {
+      // ── Keyword fallback path ─────────────────────────────────
+      response = await this.processWithKeywords(user, organizationId, query);
     }
 
-    // ── Keyword fallback path ─────────────────────────────────
-    return this.processWithKeywords(user, organizationId, query);
+    return {
+      ...response,
+      answer: this.cleanPlainEnglish(response.answer)
+    };
+  }
+
+  // Sanitizes text into clean, fluent, plain English without raw ampersands or markdown artifacts
+  private cleanPlainEnglish(text: string): string {
+    if (!text) return '';
+    return text
+      // Replace all ampersands (&) with the word "and"
+      .replace(/\s*&\s*/g, ' and ')
+      // Strip markdown bold and italic markers
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
+      // Strip markdown headers
+      .replace(/^#{1,6}\s+/gm, '')
+      // Normalize raw bullet characters
+      .replace(/^[•]\s*/gm, '- ')
+      // Strip error / robotic emojis
+      .replace(/^[❌⛔⚠️🤖]\s*/gm, '')
+      // Collapse multiple whitespace
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
   }
 
   // ───── Gemini Function-Calling Path ───────────────────────
@@ -398,24 +427,25 @@ export class PulseAiService {
     const allDepts = await departmentRepository.findAll(organizationId);
     const myDept = allDepts.find(d => d.id === user.departmentId);
 
-    const systemInstruction = `You are **Pulse AI**, the intelligent operational copilot for WorkPulse — an enterprise workflow and request management system used across organizations (corporations, universities, hospitals, government agencies).
+    const systemInstruction = `You are Pulse AI, the intelligent operational copilot for WorkPulse — an enterprise workflow and request management system.
 
-**Your current session context:**
+Your current session context:
 - Authenticated User: ${user.name}
 - Role: ${user.role}
-- Department Scope: ${myDept ? `${myDept.name} (${myDept.code})` : 'All Departments (Administrator)'}
+- Department Scope: ${myDept ? `${myDept.name.replace(/&/g, 'and')} (${myDept.code})` : 'All Departments (Administrator)'}
 - Organization ID: ${organizationId}
 
-**CRITICAL RULES:**
-1. You MUST call the appropriate tool to fetch real data before answering. Never fabricate data.
-2. Respect RBAC boundaries: if a tool returns PERMISSION_DENIED, explain the restriction respectfully and clearly.
-3. For mutating actions (assign_request), always surface the confirmation requirement to the user.
-4. Be concise and professional. Use markdown formatting with bullet points.
-5. Always reference real request IDs and actual names from tool responses.
-6. If a user asks about cross-department data and they don't have permission, explain the security boundary.
+CRITICAL RULES:
+1. Always communicate in clear, natural, grammatically correct plain English sentences and paragraphs.
+2. NEVER use ampersand characters ("&"). Always spell out the word "and".
+3. Avoid raw markdown asterisks (such as **bold** or *italic*), hashtags, or robotic formatting. Write clean sentences.
+4. Always call the appropriate tool to fetch real operational data before answering. Never fabricate data.
+5. Respect role-based access control boundaries: if a tool returns a permission error or you are asked about cross-department data without permission, state "Access Denied: You do not have permission to view records for this department..." and clearly explain the department isolation boundary.
+6. For mutating actions (assign_request), always ask for explicit user confirmation.
+7. Always reference real request IDs and actual names from tool responses.
 
-**Context about this organization's departments:**
-${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
+Context about this organization's departments:
+${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.description.replace(/&/g, 'and')}`).join('\n')}`;
 
     const models = this.genai!.models;
     const toolResults: ToolExecutionResult[] = [];
@@ -547,29 +577,29 @@ ${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
         toolResults.push({ tool: 'get_request_details', parameters: { requestId: targetReqId }, result: result || undefined, error: error || undefined });
 
         if (error) {
-          return { answer: `❌ ${error}`, toolResults };
+          return { answer: error.startsWith('Access Denied') ? error : `Access Denied: ${error}`, toolResults };
         }
 
         const r = result;
+        const cleanTitle = (r.title || '').replace(/&/g, 'and');
+        const cleanDept = (r.departmentName || '').replace(/&/g, 'and');
+        const cleanAssignee = (r.assigneeName || '').replace(/&/g, 'and');
+        const cleanBlocked = (r.waitingOn || '').replace(/&/g, 'and');
+        const cleanStep = (r.currentStepName || '').replace(/&/g, 'and');
+
         if (r.waitingOn) {
           return {
-            answer: `**${r.requestId}** ("${r.title}") is currently **WAITING**.\n\n` +
-              `• **Blocked By:** *${r.waitingOn}*\n` +
-              `• **Department:** ${r.departmentName}\n` +
-              `• **Assigned To:** ${r.assigneeName}\n` +
-              `• **Priority:** ${r.priority}`,
+            answer: `Request ${r.requestId} ("${cleanTitle}") is currently on hold with ${r.priority} priority in the ${cleanDept} department.\n\n` +
+              `It is assigned to ${cleanAssignee} and is currently waiting on: ${cleanBlocked}.`,
             toolResults,
             identifiedEntity: { type: 'request', id: r.requestId, title: r.title },
-            suggestedActions: [`Nudge assignee ${r.assigneeName}`, `View ${r.requestId} timeline`]
+            suggestedActions: [`Nudge assignee ${cleanAssignee}`, `View ${r.requestId} timeline`]
           };
         }
 
         return {
-          answer: `**${r.requestId}** ("${r.title}") — Status: **${r.status}**\n\n` +
-            `• **Department:** ${r.departmentName}\n` +
-            `• **Step:** ${r.currentStepName}\n` +
-            `• **Assigned To:** ${r.assigneeName}\n` +
-            `• **Active Tasks:** ${r.activeTasksCount}`,
+          answer: `Request ${r.requestId} ("${cleanTitle}") is currently ${r.status.toLowerCase().replace(/_/g, ' ')} within the ${cleanDept} department.\n\n` +
+            `It is at the "${cleanStep}" step, assigned to ${cleanAssignee}, with ${r.activeTasksCount} active task(s).`,
           toolResults,
           identifiedEntity: { type: 'request', id: r.requestId, title: r.title }
         };
@@ -580,12 +610,23 @@ ${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
     if (q.includes('approval') || q.includes('pending sign') || q.includes('approve')) {
       const { result, error } = await this.executeTool('get_pending_approvals', {}, user, organizationId);
       toolResults.push({ tool: 'get_pending_approvals', parameters: {}, result: result || undefined, error: error || undefined });
-      if (error) return { answer: `❌ ${error}`, toolResults };
+      if (error) return { answer: error.startsWith('Access Denied') ? error : `Access Denied: ${error}`, toolResults };
+
+      if (!result.approvals || result.approvals.length === 0) {
+        return {
+          answer: 'There are currently no requests awaiting approval in your queue. All workflows are up to date.',
+          toolResults
+        };
+      }
+
+      const approvalList = result.approvals.slice(0, 5).map((a: any, idx: number) => {
+        const title = (a.title || '').replace(/&/g, 'and');
+        const dept = (a.departmentName || '').replace(/&/g, 'and');
+        return `${idx + 1}. Request ${a.requestId} ("${title}") submitted by ${a.requesterName} for the ${dept} department.`;
+      }).join('\n');
+
       return {
-        answer: `**${result.count}** request(s) are currently awaiting approval:\n\n` +
-          (result.approvals.slice(0, 5).map((a: any) =>
-            `• **${a.requestId}**: ${a.title} — *${a.requesterName}* → ${a.departmentName}`
-          ).join('\n') || '• No pending approvals.'),
+        answer: `There are currently ${result.count} request(s) awaiting approval in your queue:\n\n${approvalList}`,
         toolResults
       };
     }
@@ -594,17 +635,20 @@ ${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
     if (q.includes('task') || q.includes('assigned to me') || q.includes('my work') || q.includes('my request') || q.includes('what do i')) {
       const { result, error } = await this.executeTool('get_my_work_summary', {}, user, organizationId);
       toolResults.push({ tool: 'get_my_work_summary', parameters: {}, result: result || undefined, error: error || undefined });
-      if (error) return { answer: `❌ ${error}`, toolResults };
+      if (error) return { answer: error.startsWith('Access Denied') ? error : `Access Denied: ${error}`, toolResults };
+
+      const taskSection = result.assignedTasks.length > 0
+        ? `You have ${result.assignedTasksCount} active task(s) assigned to you:\n` +
+          result.assignedTasks.map((t: any) => `- Task ${t.taskId}: "${(t.title || '').replace(/&/g, 'and')}" (${t.status.toLowerCase().replace(/_/g, ' ')})`).join('\n')
+        : 'You currently have no active tasks assigned to you.';
+
+      const requestSection = result.recentRequests.length > 0
+        ? `You have submitted ${result.submittedRequestsCount} active request(s):\n` +
+          result.recentRequests.map((r: any) => `- Request ${r.requestId}: "${(r.title || '').replace(/&/g, 'and')}" (${r.status.toLowerCase().replace(/_/g, ' ')})`).join('\n')
+        : 'You have no active requests submitted.';
+
       return {
-        answer: `**Your Work Summary, ${result.name}:**\n\n` +
-          `### 📋 Assigned Tasks (${result.assignedTasksCount})\n` +
-          (result.assignedTasks.length > 0
-            ? result.assignedTasks.map((t: any) => `• **${t.taskId}**: ${t.title} [${t.status}]`).join('\n')
-            : '• No active tasks.') +
-          `\n\n### 📨 Your Requests (${result.submittedRequestsCount})\n` +
-          (result.recentRequests.length > 0
-            ? result.recentRequests.map((r: any) => `• **${r.requestId}**: ${r.title} — *${r.status}*`).join('\n')
-            : '• No active requests.'),
+        answer: `Here is your work summary, ${result.name}:\n\n${taskSection}\n\n${requestSection}`,
         toolResults
       };
     }
@@ -620,19 +664,34 @@ ${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
     if (matchedDept && (q.includes('how many') || q.includes('pending') || q.includes('working') || q.includes('status') || q.includes('requests') || q.includes('show') || q.includes('queue'))) {
       const { result, error } = await this.executeTool('get_department_requests', { departmentCode: matchedDept.code }, user, organizationId);
       toolResults.push({ tool: 'get_department_requests', parameters: { departmentCode: matchedDept.code }, result: result || undefined, error: error || undefined });
-      if (error) return { answer: `⛔ ${error}`, toolResults };
+      if (error) {
+        return {
+          answer: error.startsWith('Access Denied') ? error : `Access Denied: ${error}`,
+          toolResults
+        };
+      }
+
+      const deptName = (result.departmentName || matchedDept.name).replace(/&/g, 'and');
+      const manager = (result.managerName || 'Unassigned').replace(/&/g, 'and');
+      const activeCount = result.totalActive;
+      const waitingCount = result.waitingCount;
+      const pendingApprovalCount = result.pendingApprovalCount;
+      const overdueCount = result.overdueCount;
+
+      let queueText = '';
+      if (result.topRequests && result.topRequests.length > 0) {
+        queueText = '\n\nActive requests in this queue:\n' + result.topRequests.map((r: any, idx: number) => {
+          const title = (r.title || '').replace(/&/g, 'and');
+          const status = (r.status || '').toLowerCase().replace(/_/g, ' ');
+          const assignee = (r.assignee || 'Unassigned').replace(/&/g, 'and');
+          return `${idx + 1}. Request ${r.requestId} ("${title}") is currently ${status}, assigned to ${assignee}.`;
+        }).join('\n');
+      } else {
+        queueText = '\n\nThe department queue is currently completely clear with no active requests.';
+      }
+
       return {
-        answer: `**${result.departmentName} Department Queue:**\n\n` +
-          `• **Active Requests:** ${result.totalActive}\n` +
-          `• **Waiting / Blocked:** ${result.waitingCount}\n` +
-          `• **Pending Approval:** ${result.pendingApprovalCount}\n` +
-          `• **Overdue:** ${result.overdueCount}\n` +
-          `• **Manager:** ${result.managerName}\n\n` +
-          (result.topRequests.length > 0
-            ? `**Active Queue:**\n` + result.topRequests.map((r: any) =>
-              `• **${r.requestId}**: ${r.title} — *${r.status}* (${r.assignee})`
-            ).join('\n')
-            : 'Queue is clear.'),
+        answer: `The ${deptName} department currently has ${activeCount} active request(s) in its queue, managed by ${manager}. Among these, ${waitingCount} are waiting on external blockers, ${pendingApprovalCount} are awaiting approval, and ${overdueCount} are overdue.${queueText}`,
         toolResults,
         identifiedEntity: { type: 'department', id: matchedDept.id, title: matchedDept.name }
       };
@@ -644,13 +703,17 @@ ${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
       toolResults.push({ tool: 'get_department_knowledge', parameters: { query } });
       if (result?.matchingDepartments?.length > 0) {
         return {
-          answer: result.matchingDepartments.map((d: any) =>
-            `### 🏢 ${d.name} (${d.code})\n` +
-            `• **Overview:** ${d.description}\n` +
-            `• **Manager:** ${d.managerName}\n` +
-            `• **Handles:** ${d.responsibilities.join(', ')}\n` +
-            `• **Request Types:** ${d.requestTypes.join(', ')}`
-          ).join('\n\n'),
+          answer: result.matchingDepartments.map((d: any) => {
+            const name = (d.name || '').replace(/&/g, 'and');
+            const desc = (d.description || '').replace(/&/g, 'and');
+            const manager = (d.managerName || 'Unassigned').replace(/&/g, 'and');
+            const handles = (d.responsibilities || []).map((r: string) => r.replace(/&/g, 'and')).join(', ');
+            const reqTypes = (d.requestTypes || []).map((t: string) => t.replace(/&/g, 'and')).join(', ');
+            return `The ${name} department (${d.code}) is managed by ${manager}.\n\n` +
+              `Overview: ${desc}\n` +
+              `Responsibilities: ${handles}\n` +
+              `Request Types Handled: ${reqTypes}`;
+          }).join('\n\n'),
           toolResults
         };
       }
@@ -662,15 +725,17 @@ ${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
       const { result, error } = await this.executeTool('get_organization_overview', {}, user, organizationId);
       toolResults.push({ tool: 'get_organization_overview', parameters: {}, result: result || undefined, error: error || undefined });
       if (!error && result) {
+        const deptBreakdown = result.departmentSummary.map((d: any) => {
+          const dName = (d.name || '').replace(/&/g, 'and');
+          return `- ${dName} (${d.code}): ${d.activeCount} active request(s)`;
+        }).join('\n');
+
         return {
-          answer: `**Organization Operational Overview:**\n\n` +
-            `• **Total Active Requests:** ${result.totalActiveRequests}\n` +
-            `• **Pending Approvals:** ${result.pendingApprovalCount}\n` +
-            `• **Overdue:** ${result.overdueCount}\n` +
-            `• **Waiting on Blockers:** ${result.waitingCount}\n` +
-            `• **Active Tasks:** ${result.activeTasks}\n\n` +
-            `**By Department:**\n` +
-            result.departmentSummary.map((d: any) => `• **${d.name} (${d.code}):** ${d.activeCount} active`).join('\n'),
+          answer: `Here is the organization operational overview:\n\n` +
+            `Across the entire organization, there are currently ${result.totalActiveRequests} active request(s), ` +
+            `${result.pendingApprovalCount} pending approval, ${result.waitingCount} waiting on blockers, ` +
+            `and ${result.overdueCount} overdue, with ${result.activeTasks} active task(s).\n\n` +
+            `Department Breakdown:\n${deptBreakdown}`,
           toolResults
         };
       }
@@ -678,16 +743,16 @@ ${allDepts.map(d => `- ${d.name} (${d.code}): ${d.description}`).join('\n')}`;
 
     // 7. Default help message
     const myDept = allDepts.find(d => d.id === user.departmentId);
+    const myDeptName = myDept ? myDept.name.replace(/&/g, 'and') : 'all departments';
     return {
-      answer: `Hello **${user.name}**! I am **Pulse AI**, your WorkPulse operational copilot.\n\n` +
-        `**Your Scope:** ${user.role} ${myDept ? `— ${myDept.name}` : '(All Departments)'}\n\n` +
-        `**You can ask me:**\n` +
-        `• *"How many IT requests are pending?"*\n` +
-        `• *"Why is REQ-1042 stuck?"*\n` +
-        `• *"What tasks are assigned to me?"*\n` +
-        `• *"Show me pending approvals"*\n` +
-        `• *"Which department handles software installation?"*\n` +
-        `• *"Give me the organization overview"* (Admin only)`,
+      answer: `Hello ${user.name}! I am Pulse AI, your operational visibility copilot for WorkPulse.\n\n` +
+        `You are authenticated as a ${user.role.toLowerCase().replace(/_/g, ' ')} with access scoped to ${myDeptName}.\n\n` +
+        `Here are examples of operational questions you can ask me:\n` +
+        `- "How many IT requests are currently pending?"\n` +
+        `- "Why is request REQ-1042 stuck?"\n` +
+        `- "What tasks are assigned to me?"\n` +
+        `- "Show me pending approvals"\n` +
+        `- "What does the IT department handle?"`,
       toolResults: [{ tool: 'get_ai_status', parameters: { userRole: user.role } }]
     };
   }

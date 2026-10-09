@@ -36,7 +36,7 @@ export const PulseAiDrawer: React.FC<PulseAiDrawerProps> = ({
     {
       id: 'welcome',
       role: 'assistant',
-      content: `Hello **${currentUser?.name?.split(' ')[0] || 'there'}**! I am **Pulse AI 🤖**, your operational visibility copilot.\n\nI can retrieve real-time status, diagnose bottlenecks, and check department pipelines according to your **${currentUser?.role}** permissions.`,
+      content: `Hello ${currentUser?.name?.split(' ')[0] || 'there'}! I am Pulse AI, your operational visibility copilot.\n\nI can retrieve real-time status, diagnose bottlenecks, and check department pipelines according to your ${currentUser?.role?.toLowerCase().replace(/_/g, ' ')} permissions.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -186,8 +186,8 @@ export const PulseAiDrawer: React.FC<PulseAiDrawerProps> = ({
                   </div>
                 )}
 
-                <div className="whitespace-pre-wrap text-xs font-normal">
-                  {m.content}
+                <div className="whitespace-pre-wrap text-xs font-normal leading-relaxed">
+                  {m.content.replace(/&/g, 'and').replace(/\*\*([^*]+)\*\*/g, '$1')}
                 </div>
 
                 {/* Tool execution pills */}
@@ -216,7 +216,7 @@ export const PulseAiDrawer: React.FC<PulseAiDrawerProps> = ({
         {loading && (
           <div className="flex items-center gap-2 text-xs text-indigo-400 p-2">
             <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping"></span>
-            <span>Consulting WorkPulse authorization layer & source of truth...</span>
+            <span>Consulting WorkPulse authorization layer and source of truth...</span>
           </div>
         )}
 
