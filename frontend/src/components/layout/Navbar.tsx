@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserPersona, NotificationItem } from '../../types';
-import { Bot, Search, Bell, Sparkles, ChevronDown, Shield, Users, Check, ExternalLink } from 'lucide-react';
+import { Bot, Search, Bell, Sparkles, ChevronDown, Shield, Users, Check, ExternalLink, LogOut, Trash2 } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface NavbarProps {
@@ -11,6 +11,8 @@ interface NavbarProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onOpenRequest?: (requestId: string) => void;
+  onLogout?: () => void;
+  onResetData?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -20,7 +22,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenPulseAi,
   searchQuery,
   onSearchChange,
-  onOpenRequest
+  onOpenRequest,
+  onLogout,
+  onResetData
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -240,6 +244,35 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </span>
                   </button>
                 ))}
+              </div>
+
+              {/* Actions Footer */}
+              <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-1">
+                {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ORG_ADMIN') && onResetData && (
+                  <button
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      onResetData();
+                    }}
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs font-semibold text-amber-400/90 hover:bg-amber-500/10 transition"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-amber-400" />
+                    <span>Wipe Demo Data (Start Afresh)</span>
+                  </button>
+                )}
+
+                {onLogout && (
+                  <button
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      onLogout();
+                    }}
+                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs font-semibold text-rose-400/90 hover:bg-rose-500/10 transition"
+                  >
+                    <LogOut className="h-3.5 w-3.5 text-rose-400" />
+                    <span>Log Out</span>
+                  </button>
+                )}
               </div>
             </div>
           )}

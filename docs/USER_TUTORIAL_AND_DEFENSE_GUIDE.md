@@ -59,9 +59,37 @@ npm run dev
 
 ---
 
-## 3. Demo Personas & Credentials
+## 3. Real Authentication & Starting Afresh with Your Own Data
 
-The system comes pre-seeded with realistic enterprise and academic personas:
+WorkPulse features a production **Sign In / Create Account Portal** (`AuthPage`):
+
+### A. Registering Your Own Organization (Clean Slate)
+1. Open [`http://localhost:3000`](http://localhost:3000). If you are not logged in, the **Sign In / Create Account** portal is displayed.
+2. Click **"Create Account"**.
+3. Fill in:
+   - **Full Name**: (e.g., *Dr. Alistair Vance* or your name)
+   - **Work Email**: (e.g., *dean@university.edu*)
+   - **Password**: (minimum 6 characters)
+   - Select **"+ Create New Org"** and enter your organization name (e.g., *Greenfield State University* or *Apex Logistics*).
+4. Click **"Create Account & Start"**:
+   - The backend creates your new tenant boundary (`organizations` table).
+   - You are automatically initialized as the **`SUPER_ADMIN`** of this new organization!
+   - You are securely logged in with an authorized JWT session stored in `localStorage`.
+   - **Zero Demo Clutter**: Your new workspace starts with **0 departments, 0 requests, and 0 tasks**!
+
+### B. Starting Afresh from an Existing Account
+If you log into an existing account (or Super Admin) and wish to wipe old demo tickets:
+1. Open the user profile dropdown in the top-right corner of the Navbar.
+2. Click **"Wipe Demo Data (Start Afresh)"**.
+3. Confirm the prompt: all demo requests, tasks, notifications, and logs are purged, giving you a 100% clean slate while retaining your admin account.
+
+### C. Signing Up Employees & Assigning Roles
+1. Other colleagues or students can register by choosing **"Join Existing Org"** and selecting your organization from the dropdown.
+2. They are registered as **`EMPLOYEE`** members.
+3. You (as Super Admin) create departments and assign department managers from the **Departments** tab.
+
+### D. Pre-Seeded Testing Accounts (Optional Helper)
+For rapid testing or examination grading, the login page includes a collapsible accordion: **"Existing Pre-Seeded Accounts"**:
 
 | Persona | Role | Department | Email | Password | Primary Capabilities |
 | :--- | :--- | :--- | :--- | :--- | :--- |

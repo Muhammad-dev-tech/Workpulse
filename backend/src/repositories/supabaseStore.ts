@@ -16,6 +16,7 @@ import {
   AttachmentItem
 } from '../types';
 import {
+  IOrganizationRepository,
   IRequestRepository,
   ITaskRepository,
   IWorkflowRepository,
@@ -1112,5 +1113,79 @@ export class SupabaseAuditRepository implements IAuditRepository {
       toolName,
       { toolName, params, confirmed, summary }
     );
+  }
+}
+
+// ────────────────────────────────────────────────────
+//  ORGANIZATION REPOSITORY
+// ────────────────────────────────────────────────────
+export class SupabaseOrganizationRepository implements IOrganizationRepository {
+  private db = getSupabaseClient();
+
+  private mapOrg(row: Record<string, any>): Organization {
+    return {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      plan: row.plan || 'free',
+      createdAt: row.created_at
+    };
+  }
+
+  async findById(id: string): Promise<Organization | null> {
+    const { data, error } = await this.db
+      .from('organizations')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error || !data) return null;
+    return this.mapOrg(data);
+  }
+
+  async findBySlug(slug: string): Promise<Organization | null> {
+    const { data, error } = await this.db
+      .from('organizations')
+      .select('*')
+      .eq('slug', slug)
+      .single();
+    if (error || !data) return null;
+    return this.mapOrg(data);
+  }
+
+  async findAll(): Promise<Organization[]> {
+    const { data, error } = await this.db
+      .from('organizations')
+      .select('*')
+      .order('name', { ascending: true });
+    if (error || !data) return [];
+    return data.map(r => this.mapOrg(r));
+  }
+
+  async create(data: { name: string; slug?: string }): Promise<Organization> {
+    const baseSlug = data.slug || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const slug = `${baseSlug}-${Date.now().toString().slice(-4)}`;
+    const { data: created, error } = await this.db
+      .from('organizations')
+      .insert({
+        name: data.name,
+        slug,
+        plan: 'enterprise'
+      })
+      .select()
+      .single();
+    if (error || !created) throw new Error(error?.message || 'Failed to create organization');
+    return this.mapOrg(created);
+  }
+}
+
+export async function wipeSupabaseOrgData(organizationId: string, options: { wipeDepartments?: boolean } = {}): Promise<void> {
+  const db = getSupabaseClient();
+  // Delete all tasks, timeline events, comments, approvals, requests
+  await db.from('tasks').delete().eq('organization_id', organizationId);
+  await db.from('requests').delete().eq('organization_id', organizationId);
+  await db.from('notifications').delete().eq('organization_id', organizationId);
+  await db.from('audit_logs').delete().eq('organization_id', organizationId);
+  if (options.wipeDepartments) {
+    await db.from('departments').delete().eq('organization_id', organizationId);
   }
 }

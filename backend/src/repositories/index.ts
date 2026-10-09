@@ -11,7 +11,9 @@ import {
   MemoryDepartmentRepository,
   MemoryUserRepository,
   MemoryNotificationRepository,
-  MemoryAuditRepository
+  MemoryAuditRepository,
+  MemoryOrganizationRepository,
+  wipeMemoryOrgData
 } from './memoryStore';
 
 import {
@@ -21,7 +23,9 @@ import {
   SupabaseDepartmentRepository,
   SupabaseUserRepository,
   SupabaseNotificationRepository,
-  SupabaseAuditRepository
+  SupabaseAuditRepository,
+  SupabaseOrganizationRepository,
+  wipeSupabaseOrgData
 } from './supabaseStore';
 
 const useSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -32,6 +36,7 @@ if (useSupabase) {
   console.log('  🗄️  Data layer: In-Memory Seed Store (set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to use Supabase)');
 }
 
+export const organizationRepository = useSupabase ? new SupabaseOrganizationRepository() : new MemoryOrganizationRepository();
 export const requestRepository      = useSupabase ? new SupabaseRequestRepository()      : new MemoryRequestRepository();
 export const taskRepository         = useSupabase ? new SupabaseTaskRepository()         : new MemoryTaskRepository();
 export const workflowRepository     = useSupabase ? new SupabaseWorkflowRepository()     : new MemoryWorkflowRepository();
@@ -39,3 +44,12 @@ export const departmentRepository   = useSupabase ? new SupabaseDepartmentReposi
 export const userRepository         = useSupabase ? new SupabaseUserRepository()         : new MemoryUserRepository();
 export const notificationRepository = useSupabase ? new SupabaseNotificationRepository() : new MemoryNotificationRepository();
 export const auditRepository        = useSupabase ? new SupabaseAuditRepository()        : new MemoryAuditRepository();
+
+export const wipeOrgData = async (organizationId: string, options: { wipeDepartments?: boolean } = {}) => {
+  if (useSupabase) {
+    await wipeSupabaseOrgData(organizationId, options);
+  } else {
+    wipeMemoryOrgData(organizationId, options);
+  }
+};
+

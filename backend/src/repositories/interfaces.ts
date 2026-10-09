@@ -3,6 +3,7 @@ import {
   WorkflowTemplate,
   Department,
   User,
+  Organization,
   TimelineEvent,
   Comment,
   Approval,
@@ -11,6 +12,13 @@ import {
   AuditLog,
   AttachmentItem
 } from '../types';
+
+export interface IOrganizationRepository {
+  findById(id: string): Promise<Organization | null>;
+  findBySlug(slug: string): Promise<Organization | null>;
+  findAll(): Promise<Organization[]>;
+  create(data: { name: string; slug?: string }): Promise<Organization>;
+}
 
 export interface IRequestRepository {
   findById(organizationId: string, id: string): Promise<RequestItem | null>;

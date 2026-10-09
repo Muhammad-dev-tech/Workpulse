@@ -13,6 +13,7 @@ import {
   AttachmentItem
 } from '../types';
 import {
+  IOrganizationRepository,
   IRequestRepository,
   ITaskRepository,
   IWorkflowRepository,
@@ -1046,3 +1047,67 @@ export class MemoryAuditRepository implements IAuditRepository {
     );
   }
 }
+
+// ────────────────────────────────────────────────────
+//  ORGANIZATION REPOSITORY
+// ────────────────────────────────────────────────────
+export class MemoryOrganizationRepository implements IOrganizationRepository {
+  async findById(id: string): Promise<Organization | null> {
+    const org = organizations.find(o => o.id === id);
+    return org ? JSON.parse(JSON.stringify(org)) : null;
+  }
+
+  async findBySlug(slug: string): Promise<Organization | null> {
+    const org = organizations.find(o => o.slug === slug);
+    return org ? JSON.parse(JSON.stringify(org)) : null;
+  }
+
+  async findAll(): Promise<Organization[]> {
+    return JSON.parse(JSON.stringify(organizations));
+  }
+
+  async create(data: { name: string; slug?: string }): Promise<Organization> {
+    const baseSlug = data.slug || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const newOrg: Organization = {
+      id: `org-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      name: data.name,
+      slug: `${baseSlug}-${Date.now().toString().slice(-4)}`,
+      plan: 'enterprise',
+      createdAt: new Date().toISOString()
+    };
+    organizations.push(newOrg);
+    return JSON.parse(JSON.stringify(newOrg));
+  }
+}
+
+export function wipeMemoryOrgData(organizationId: string, options: { wipeDepartments?: boolean } = {}): void {
+  // Clear requests, tasks, notifications, audit logs for organization
+  for (let i = requests.length - 1; i >= 0; i--) {
+    if (requests[i].organizationId === organizationId) {
+      requests.splice(i, 1);
+    }
+  }
+  for (let i = tasks.length - 1; i >= 0; i--) {
+    if (tasks[i].organizationId === organizationId) {
+      tasks.splice(i, 1);
+    }
+  }
+  for (let i = notifications.length - 1; i >= 0; i--) {
+    if (notifications[i].organizationId === organizationId) {
+      notifications.splice(i, 1);
+    }
+  }
+  for (let i = auditLogs.length - 1; i >= 0; i--) {
+    if (auditLogs[i].organizationId === organizationId) {
+      auditLogs.splice(i, 1);
+    }
+  }
+  if (options.wipeDepartments) {
+    for (let i = departments.length - 1; i >= 0; i--) {
+      if (departments[i].organizationId === organizationId) {
+        departments.splice(i, 1);
+      }
+    }
+  }
+}
+

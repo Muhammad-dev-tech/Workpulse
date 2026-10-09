@@ -7,6 +7,11 @@ export const setAuthToken = (token: string) => {
   localStorage.setItem('workpulse_token', token);
 };
 
+export const clearAuthToken = () => {
+  currentToken = '';
+  localStorage.removeItem('workpulse_token');
+};
+
 export const getAuthToken = () => currentToken;
 
 const getHeaders = () => ({
@@ -22,11 +27,11 @@ export const api = {
     return json.data || [];
   },
 
-  async login(email: string): Promise<{ user: UserPersona; token: string }> {
+  async login(email: string, password?: string): Promise<{ user: UserPersona; token: string }> {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email, ...(password ? { password } : {}) })
     });
     const json = await res.json();
     if (json.success) {
@@ -34,6 +39,62 @@ export const api = {
       return json.data;
     }
     throw new Error(json.error?.message || 'Login failed');
+  },
+
+  async register(payload: {
+    name: string;
+    email: string;
+    password: string;
+    organizationName?: string;
+    organizationId?: string;
+  }): Promise<{ user: UserPersona; token: string }> {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (json.success) {
+      setAuthToken(json.data.token);
+      return json.data;
+    }
+    throw new Error(json.error?.message || 'Registration failed');
+  },
+
+  async getMe(): Promise<UserPersona | null> {
+    if (!currentToken) return null;
+    try {
+      const res = await fetch('/api/auth/me', { headers: getHeaders() });
+      if (!res.ok) {
+        clearAuthToken();
+        return null;
+      }
+      const json = await res.json();
+      return json.data || null;
+    } catch {
+      return null;
+    }
+  },
+
+  async getOrganizations(): Promise<Array<{ id: string; name: string; slug: string }>> {
+    const res = await fetch('/api/auth/organizations');
+    const json = await res.json();
+    return json.data || [];
+  },
+
+  logout(): void {
+    clearAuthToken();
+  },
+
+  async resetData(options: { wipeDepartments?: boolean } = {}): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/auth/reset-data', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(options)
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error?.message || 'Failed to reset data');
+    return json;
   },
 
   // Operational Radar

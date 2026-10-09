@@ -11,6 +11,7 @@ import { TaskListView } from './components/tasks/TaskListView';
 import { AuditLogView } from './components/audit/AuditLogView';
 import { Section33ScenarioBar } from './components/guided/Section33ScenarioBar';
 import { PulseAiDrawer } from './components/ai/PulseAiDrawer';
+import { AuthPage } from './components/auth/AuthPage';
 import { RequestItem, PendingRadarData, UserPersona, Department, TaskItem } from './types';
 import { api } from './services/api';
 import {
@@ -58,16 +59,44 @@ export const App: React.FC = () => {
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      const fetchedPersonas = await api.getPersonas();
-      setPersonas(fetchedPersonas);
-
-      // Default persona: Muhammad Tariq (Manager) or Super Admin
-      const muhammad = fetchedPersonas.find(p => p.email === 'muhammad@acme.com') || fetchedPersonas[0];
-      if (muhammad) {
-        await switchPersona(muhammad.email);
+      const me = await api.getMe();
+      if (me) {
+        setCurrentUser(me);
+        try {
+          const fetchedPersonas = await api.getPersonas();
+          setPersonas(fetchedPersonas);
+        } catch {}
+        await refreshData();
+      } else {
+        setCurrentUser(null);
       }
     } catch (err: any) {
       console.error('Initialization error:', err);
+      setCurrentUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    api.logout();
+    setCurrentUser(null);
+    setRequests([]);
+    setTasks([]);
+    setRadar(null);
+  };
+
+  const handleResetData = async () => {
+    if (!window.confirm('Are you sure you want to wipe all demo workflow data? This will clear all requests, tasks, notifications, and audit records so you can start 100% fresh with your own real operational data.')) {
+      return;
+    }
+    try {
+      setLoading(true);
+      await api.resetData({ wipeDepartments: false });
+      await refreshData();
+      alert('✨ Demo records successfully wiped! You now have a clean slate to create your own departments, requests, and workflows.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to wipe data.');
     } finally {
       setLoading(false);
     }
@@ -169,6 +198,32 @@ export const App: React.FC = () => {
   const isManager = currentUser?.role === 'MANAGER';
   const isEmployee = currentUser?.role === 'EMPLOYEE';
 
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-[#07090e] text-slate-300">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+          <span className="text-xs font-semibold text-slate-400">Loading WorkPulse...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthPage
+        onLoginSuccess={async (user) => {
+          setCurrentUser(user);
+          try {
+            const fetchedPersonas = await api.getPersonas();
+            setPersonas(fetchedPersonas);
+          } catch {}
+          await refreshData();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-[#0b0f19] text-slate-100 font-sans">
       {/* Top Navbar */}
@@ -183,6 +238,8 @@ export const App: React.FC = () => {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onOpenRequest={handleOpenDetails}
+        onLogout={handleLogout}
+        onResetData={handleResetData}
       />
 
       {/* Section 33 Interactive Scenario Controller Bar */}
@@ -223,6 +280,30 @@ export const App: React.FC = () => {
               activeFilter={radarFilter}
               onFilterSelect={setRadarFilter}
             />
+          )}
+
+          {/* Clean Slate Onboarding Banner */}
+          {departments.length === 0 && (
+            <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 p-6 backdrop-blur-md">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-indigo-400" />
+                    <h3 className="text-base font-bold text-white">Welcome to your Fresh Workspace!</h3>
+                  </div>
+                  <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+                    Zero demo clutter. You are ready to start with your own organizational structure. Set up your departments (e.g. IT, Computer Science, Registry, Finance, Operations) and define their custom request types.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCreateDeptModalOpen(true)}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-500 px-4 py-2.5 text-xs font-bold text-white shadow-glow-indigo transition hover:brightness-110 shrink-0"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Create First Department</span>
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Section Heading & Filter Bar */}
