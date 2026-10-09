@@ -228,8 +228,6 @@ export const App: React.FC = () => {
       {/* Top Navbar */}
       <Navbar
         currentUser={currentUser}
-        personas={personas}
-        onSelectPersona={switchPersona}
         onOpenPulseAi={() => {
           setPulseAiInitialPrompt(undefined);
           setPulseAiOpen(true);

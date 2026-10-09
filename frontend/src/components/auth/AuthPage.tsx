@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { UserPersona } from '../../types';
-import { Shield, Sparkles, Building, Mail, Lock, User, ArrowRight, CheckCircle2, AlertCircle, KeyRound, ChevronDown } from 'lucide-react';
+import { Shield, Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react';
 
 interface AuthPageProps {
   onLoginSuccess: (user: UserPersona) => void;
@@ -24,9 +24,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [orgName, setOrgName] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
   const [availableOrgs, setAvailableOrgs] = useState<Array<{ id: string; name: string }>>([]);
-
-  // Demo accounts helper (collapsible)
-  const [showDemoList, setShowDemoList] = useState(false);
 
   useEffect(() => {
     loadOrganizations();
@@ -95,13 +92,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemoLogin = (email: string, pass: string) => {
-    setTab('login');
-    setLoginEmail(email);
-    setLoginPassword(pass);
-    setError(null);
   };
 
   return (
@@ -368,48 +358,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
               </button>
             </form>
           )}
-
-          {/* Quick Demo Credentials Accordion */}
-          <div className="mt-6 pt-5 border-t border-slate-800/80">
-            <button
-              type="button"
-              onClick={() => setShowDemoList(!showDemoList)}
-              className="w-full flex items-center justify-between text-[11px] font-semibold text-slate-400 hover:text-slate-300 transition"
-            >
-              <span className="flex items-center gap-1.5">
-                <KeyRound className="h-3.5 w-3.5 text-indigo-400" />
-                <span>Existing Pre-Seeded Accounts</span>
-              </span>
-              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showDemoList ? 'rotate-180' : ''}`} />
-            </button>
-
-            {showDemoList && (
-              <div className="mt-3 space-y-1.5 animate-in fade-in">
-                {[
-                  { name: 'Super Admin / VC', email: 'admin@acme.com', pass: 'admin123', role: 'SUPER_ADMIN' },
-                  { name: 'Muhammad Tariq (IT Mgr)', email: 'muhammad@acme.com', pass: 'manager123', role: 'MANAGER' },
-                  { name: 'Sarah Connor (Finance Mgr)', email: 'sarah@acme.com', pass: 'manager123', role: 'MANAGER' },
-                  { name: 'Aisha Patel (Employee/Student)', email: 'aisha@acme.com', pass: 'employee123', role: 'EMPLOYEE' },
-                  { name: 'Ahmed Khan (Technician)', email: 'ahmed@acme.com', pass: 'employee123', role: 'EMPLOYEE' }
-                ].map((acc) => (
-                  <button
-                    key={acc.email}
-                    type="button"
-                    onClick={() => fillDemoLogin(acc.email, acc.pass)}
-                    className="w-full flex items-center justify-between rounded-lg bg-slate-950/40 p-2 text-left hover:bg-slate-800/60 border border-slate-800/60 transition"
-                  >
-                    <div>
-                      <div className="text-[11px] font-semibold text-slate-200">{acc.name}</div>
-                      <div className="text-[10px] text-slate-400">{acc.email}</div>
-                    </div>
-                    <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300">
-                      {acc.role}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>

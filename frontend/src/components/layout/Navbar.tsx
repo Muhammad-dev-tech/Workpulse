@@ -5,8 +5,6 @@ import { api } from '../../services/api';
 
 interface NavbarProps {
   currentUser: UserPersona | null;
-  personas: UserPersona[];
-  onSelectPersona: (email: string) => void;
   onOpenPulseAi: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
@@ -17,8 +15,6 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
-  personas,
-  onSelectPersona,
   onOpenPulseAi,
   searchQuery,
   onSearchChange,
@@ -211,52 +207,54 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ChevronDown className="h-3.5 w-3.5 text-slate-400 ml-1" />
           </button>
 
-          {/* Persona Menu */}
+          {/* User Profile Dropdown */}
           {dropdownOpen && (
-            <div className="glass-dropdown absolute right-0 mt-2 w-80 rounded-2xl p-2 z-50 animate-in fade-in zoom-in-95 border border-slate-800">
-              <div className="px-3 py-2 border-b border-slate-800 text-[11px] font-semibold text-slate-400 flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Shield className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>Switch Role / User (RBAC Enforced)</span>
-                </span>
-              </div>
-              <div className="mt-1 max-h-80 overflow-y-auto space-y-1">
-                {personas.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      onSelectPersona(p.email);
-                      setDropdownOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition text-xs ${
-                      currentUser?.id === p.id
-                        ? 'bg-indigo-600/20 text-white font-medium border border-indigo-500/30'
-                        : 'text-slate-300 hover:bg-slate-800/60'
-                    }`}
-                  >
-                    <img src={p.avatarUrl} alt={p.name} className="h-7 w-7 rounded-lg object-cover shrink-0" />
-                    <div className="flex flex-col flex-1 min-w-0">
-                      <span className="truncate font-semibold text-slate-100">{p.name}</span>
-                      <span className="text-[10px] text-slate-400 truncate">{p.email}</span>
-                    </div>
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded border uppercase font-bold shrink-0 ${getRoleBadge(p.role)}`}>
-                      {p.role.split('_')[0]}
+            <div className="glass-dropdown absolute right-0 mt-2 w-72 rounded-2xl p-4 z-50 animate-in fade-in zoom-in-95 border border-slate-800 bg-slate-900/95 backdrop-blur-xl shadow-2xl space-y-3">
+              {/* User Identity Details */}
+              <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+                <img
+                  src={currentUser?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=128&fit=crop"}
+                  alt={currentUser?.name || "User"}
+                  className="h-11 w-11 rounded-xl object-cover ring-2 ring-indigo-500/30 shrink-0"
+                />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-bold text-white truncate">{currentUser?.name}</span>
+                  <span className="text-xs text-slate-400 truncate">{currentUser?.email}</span>
+                  <div className="mt-1">
+                    <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border inline-block ${getRoleBadge(currentUser?.role || '')}`}>
+                      {currentUser?.role}
                     </span>
-                  </button>
-                ))}
+                  </div>
+                </div>
               </div>
 
-              {/* Actions Footer */}
-              <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-1">
+              {/* Account Scope Summary */}
+              <div className="space-y-1.5 text-xs">
+                <div className="flex justify-between py-1 border-b border-slate-800/40">
+                  <span className="text-slate-400">Department Scope:</span>
+                  <span className="font-semibold text-slate-200">
+                    {currentUser?.departmentId ? currentUser.departmentId.replace('dept-', '').toUpperCase() : 'Executive / Global'}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-800/40">
+                  <span className="text-slate-400">Session Security:</span>
+                  <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> Authenticated JWT
+                  </span>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="space-y-1 pt-1">
                 {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ORG_ADMIN') && onResetData && (
                   <button
                     onClick={() => {
                       setDropdownOpen(false);
                       onResetData();
                     }}
-                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs font-semibold text-amber-400/90 hover:bg-amber-500/10 transition"
+                    className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition"
                   >
-                    <Trash2 className="h-3.5 w-3.5 text-amber-400" />
+                    <Trash2 className="h-4 w-4 text-amber-400" />
                     <span>Wipe Demo Data (Start Afresh)</span>
                   </button>
                 )}
@@ -267,10 +265,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setDropdownOpen(false);
                       onLogout();
                     }}
-                    className="w-full flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs font-semibold text-rose-400/90 hover:bg-rose-500/10 transition"
+                    className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-rose-400 hover:bg-rose-500/10 transition"
                   >
-                    <LogOut className="h-3.5 w-3.5 text-rose-400" />
-                    <span>Log Out</span>
+                    <LogOut className="h-4 w-4 text-rose-400" />
+                    <span>Sign Out</span>
                   </button>
                 )}
               </div>
