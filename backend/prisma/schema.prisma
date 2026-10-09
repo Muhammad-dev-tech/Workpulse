@@ -1,0 +1,279 @@
+// WorkPulse Prisma Schema for PostgreSQL & Supabase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  MANAGER
+  EMPLOYEE
+  OPERATOR
+}
+
+enum RequestPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum RequestStatus {
+  DRAFT
+  SUBMITTED
+  ACTIVE
+  WAITING
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Organization {
+  id          String       @id @default(uuid())
+  name        String
+  slug        String       @unique
+  plan        String       @default("pro")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  users       User[]
+  departments Department[]
+  requests    Request[]
+  workflows   WorkflowTemplate[]
+  auditLogs   AuditLog[]
+  aiAudits    AiAuditLog[]
+
+  @@map("organizations")
+}
+
+model Department {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  code           String
+  managerId      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users          User[]
+  requests       Request[]
+  workflowSteps  WorkflowStep[]
+
+  @@unique([organizationId, code])
+  @@map("departments")
+}
+
+model User {
+  id             String       @id @default(uuid())
+  organizationId String
+  departmentId   String?
+  email          String       @unique
+  passwordHash   String
+  name           String
+  role           UserRole     @default(EMPLOYEE)
+  avatarUrl      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department     Department?  @relation(fields: [departmentId], references: [id])
+  
+  createdRequests   Request[]       @relation("Requester")
+  assignedRequests  Request[]       @relation("Assignee")
+  approvals         Approval[]
+  comments          Comment[]
+  notifications     Notification[]
+  timelineEvents    TimelineEvent[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model WorkflowTemplate {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  steps          WorkflowStep[]
+  requests       Request[]
+
+  @@map("workflow_templates")
+}
+
+model WorkflowStep {
+  id          String           @id @default(uuid())
+  templateId  String
+  stepOrder   Int
+  name        String
+  description String?
+  departmentId String?
+  requiredRole UserRole?
+  requiresApproval Boolean     @default(false)
+  slaHours    Int              @default(24)
+
+  template    WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  department  Department?      @relation(fields: [departmentId], references: [id])
+  requests    Request[]        @relation("CurrentStep")
+  approvals   Approval[]
+
+  @@map("workflow_steps")
+}
+
+model Request {
+  id                 String           @id @default(uuid())
+  requestId          String           // Human friendly e.g. REQ-1042
+  organizationId     String
+  requesterId        String
+  departmentId       String
+  currentStepId      String?
+  workflowTemplateId String?
+  assigneeId         String?
+  
+  title              String
+  description        String
+  priority           RequestPriority  @default(MEDIUM)
+  status             RequestStatus    @default(SUBMITTED)
+  
+  waitingOn          String?          // Bottleneck text: e.g. "Supplier quotation"
+  waitingSince       DateTime?
+  
+  dueDate            DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requester          User             @relation("Requester", fields: [requesterId], references: [id])
+  department         Department       @relation(fields: [departmentId], references: [id])
+  assignee           User?            @relation("Assignee", fields: [assigneeId], references: [id])
+  currentStep        WorkflowStep?    @relation("CurrentStep", fields: [currentStepId], references: [id])
+  workflowTemplate   WorkflowTemplate?@relation(fields: [workflowTemplateId], references: [id])
+
+  approvals          Approval[]
+  comments           Comment[]
+  timeline           TimelineEvent[]
+
+  @@unique([organizationId, requestId])
+  @@index([organizationId, status])
+  @@index([organizationId, departmentId])
+  @@index([organizationId, assigneeId])
+  @@index([organizationId, requesterId])
+  @@map("requests")
+}
+
+model Approval {
+  id          String         @id @default(uuid())
+  requestId   String
+  stepId      String?
+  approverId  String
+  status      ApprovalStatus @default(PENDING)
+  notes       String?
+  decidedAt   DateTime?
+  createdAt   DateTime       @default(now())
+
+  request     Request        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  step        WorkflowStep?  @relation(fields: [stepId], references: [id])
+  approver    User           @relation(fields: [approverId], references: [id])
+
+  @@map("approvals")
+}
+
+model TimelineEvent {
+  id          String       @id @default(uuid())
+  requestId   String
+  actorId     String?
+  eventType   String       // CREATED, ASSIGNED, STATUS_CHANGE, STAGE_TRANSITION, WAITING_ON, COMMENT, APPROVAL
+  title       String
+  details     String?
+  createdAt   DateTime     @default(now())
+
+  request     Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor       User?        @relation(fields: [actorId], references: [id])
+
+  @@index([requestId, createdAt])
+  @@map("timeline_events")
+}
+
+model Comment {
+  id          String       @id @default(uuid())
+  requestId   String
+  authorId    String
+  content     String
+  createdAt   DateTime     @default(now())
+
+  request     Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  author      User         @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
+}
+
+model Notification {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  title          String
+  message        String
+  link           String?
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+model AiAuditLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  conversationId String?
+  toolName       String
+  parameters     Json
+  confirmed      Boolean      @default(true)
+  resultSummary  String?
+  success        Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("ai_audit_logs")
+}

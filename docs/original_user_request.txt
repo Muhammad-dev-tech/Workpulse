@@ -1,0 +1,1280 @@
+<USER_REQUEST>
+You are a senior software architect, senior full-stack developer,
+database engineer, UI/UX engineer, security engineer, QA engineer,
+and AI integration engineer.
+
+Your task is to design and build WORKPULSE, a production-quality
+organizational workflow and activity management platform.
+
+IMPORTANT:
+This is a serious real-world software project and final-year project.
+It must NOT be treated as a simple demo, tutorial, mockup, or collection
+of disconnected screens.
+
+The system must have a coherent architecture where authentication,
+authorization, organizations, users, roles, departments, responsibilities,
+request types, tasks, workflows, permissions, dashboards, notifications,
+analytics, audit logs and Pulse AI all work together.
+
+====================================================
+1. PROJECT NAME
+====================================================
+
+WORKPULSE
+
+Working description:
+
+"An AI-enhanced organizational workflow, request and activity
+management platform."
+
+The system helps organizations digitally manage departments,
+employees, requests, tasks, workflows, communication, organizational
+knowledge and operational activities.
+
+It must be configurable so that different organizations can define
+their own departments, responsibilities, request types, task types
+and workflows without changing the application's source code.
+
+====================================================
+2. CORE DESIGN PRINCIPLE
+====================================================
+
+WORKPULSE MUST BE CONFIGURATION-DRIVEN.
+
+Do NOT hard-code departments such as:
+
+- IT
+- Finance
+- HR
+- Sales
+
+into the application logic.
+
+Instead, departments are created and configured by authorized
+administrators.
+
+The organization defines:
+
+Organization
+    ↓
+Departments
+    ↓
+Department responsibilities
+    ↓
+Request types
+    ↓
+Task types
+    ↓
+Workflows
+    ↓
+Employees
+    ↓
+Managers
+    ↓
+Permissions
+    ↓
+Operational data
+
+The same WorkPulse application must be capable of supporting
+different organizations with different organizational structures.
+
+====================================================
+3. USER ACCOUNT PRINCIPLE
+====================================================
+
+Users register/create accounts through the appropriate registration
+process.
+
+A normal user MUST NOT be allowed to choose:
+
+- Super Administrator
+- Organization Administrator
+- Department Manager
+
+for themselves.
+
+The backend determines the user's role.
+
+The Super Administrator or authorized administrator assigns
+organizational roles and departments.
+
+Example:
+
+User:
+Muhammad
+
+Email:
+muhammad@company.com
+
+Role:
+Department Manager
+
+Department:
+IT
+
+The user does NOT type "IT Manager" during login.
+
+The backend stores and enforces this relationship.
+
+====================================================
+4. PRIMARY ROLES
+====================================================
+
+Implement these primary roles:
+
+1. SUPER ADMINISTRATOR
+2. ORGANIZATION ADMINISTRATOR
+3. DEPARTMENT MANAGER
+4. EMPLOYEE
+
+Pulse AI is NOT a normal human role.
+
+Pulse AI is an AI service/assistant operating through controlled
+permissions and authorization.
+
+Do not create a fake "Pulse AI user account" that bypasses security.
+
+====================================================
+5. SUPER ADMINISTRATOR
+====================================================
+
+The Super Administrator controls the WorkPulse platform and
+organization configuration.
+
+Capabilities may include:
+
+- Manage organizations
+- Manage users
+- Manage roles
+- Manage permissions
+- Create departments
+- Configure departments
+- Assign department managers
+- Assign employees to departments
+- Configure organizational settings
+- View system-wide audit logs
+- Manage security settings
+- Manage AI configuration
+- View system-wide analytics
+
+The Super Administrator is NOT automatically allowed to perform
+every business operation unless the permission model explicitly
+allows it.
+
+Keep system administration and business responsibility logically
+separate.
+
+====================================================
+6. ORGANIZATION ADMINISTRATOR
+====================================================
+
+The Organization Administrator manages the organization's internal
+structure and users.
+
+Capabilities may include:
+
+- Manage employees
+- Manage departments
+- Assign employees
+- Configure department information
+- Manage organizational request types
+- Manage organizational workflows
+- View organization-level reports
+- Manage organizational settings
+
+Exact permissions must be controlled by the authorization layer.
+
+====================================================
+7. DEPARTMENT MANAGER
+====================================================
+
+A Department Manager manages ONE assigned department by default.
+
+Example:
+
+Muhammad
+Role = Department Manager
+Department = IT
+
+The manager should see the IT operational environment.
+
+The manager can:
+
+- View department requests
+- Review applicable requests
+- Approve/reject requests where authorized
+- Assign tasks
+- Monitor team activities
+- Update task status
+- View department reports
+- Manage department workflows where authorized
+- Escalate requests
+- Monitor department performance
+
+A Department Manager must NOT automatically have access to
+another department's private operational data.
+
+Example:
+
+IT Manager must not automatically access Finance requests.
+
+====================================================
+8. EMPLOYEE
+====================================================
+
+Employees can:
+
+- Submit requests
+- View their own requests
+- View request status
+- View assigned tasks
+- Update assigned task progress
+- Receive notifications
+- Communicate where permitted
+- Access authorized organizational information
+- Use Pulse AI
+
+Employees must only access data allowed by the authorization system.
+
+====================================================
+9. DEPARTMENT MODEL
+====================================================
+
+A department is NOT simply a name.
+
+A department should contain configurable organizational knowledge.
+
+Example:
+
+IT Department
+
+Description:
+Handles organizational technology and technical support.
+
+Manager:
+Muhammad
+
+Employees:
+Ahmed
+Aisha
+Ibrahim
+
+Responsibilities:
+
+- Technical Support
+- Software Management
+- Account Management
+- System Administration
+
+Request Types:
+
+- Technical Support
+- Software Installation
+- Account Access
+- System Issue
+
+Task Types:
+
+- Diagnose issue
+- Install software
+- Reset account
+- Resolve technical problem
+
+Workflows:
+
+Technical Support Request
+    ↓
+Employee submits
+    ↓
+IT receives request
+    ↓
+Manager reviews
+    ↓
+Task assigned
+    ↓
+Technician works
+    ↓
+Manager verifies
+    ↓
+Completed
+
+All of this must be configurable through the application.
+
+====================================================
+10. DEPARTMENT CREATION
+====================================================
+
+Provide an administrative Department Setup interface.
+
+Example:
+
+Create Department
+
+Name:
+[ IT ]
+
+Description:
+[ Technical support and organizational technology ]
+
+Manager:
+[ Select eligible registered user ]
+
+Responsibilities:
+[ + Add Responsibility ]
+
+Request Types:
+[ + Add Request Type ]
+
+Task Types:
+[ + Add Task Type ]
+
+Workflow:
+[ Configure Workflow ]
+
+The system should save these relationships in the database.
+
+====================================================
+11. MANAGER ASSIGNMENT
+====================================================
+
+A Department Manager should normally be selected from existing
+registered and eligible users.
+
+The Super Administrator/authorized administrator sees eligible users.
+
+Example:
+
+Registered users:
+
+Muhammad
+Aisha
+Ahmed
+Ibrahim
+
+The administrator creates:
+
+IT Department
+
+Manager:
+Muhammad
+
+The backend then associates:
+
+Muhammad
+    ↓
+Role = Department Manager
+    ↓
+Department = IT
+
+Do NOT trust the frontend to assign roles.
+
+The backend must validate and enforce the assignment.
+
+====================================================
+12. AUTHENTICATION
+====================================================
+
+Use secure authentication.
+
+Login should require appropriate credentials.
+
+After successful authentication:
+
+1. Identify user
+2. Retrieve user account
+3. Retrieve role
+4. Retrieve organization
+5. Retrieve department assignment
+6. Retrieve permissions
+7. Establish authenticated session/token
+8. Determine authorized application context
+9. Load appropriate dashboard
+
+Example:
+
+Muhammad logs in.
+
+Backend determines:
+
+User:
+Muhammad
+
+Role:
+Department Manager
+
+Department:
+IT
+
+Therefore:
+
+Load:
+IT Department Manager Dashboard
+
+The user should NOT select:
+
+[ IT Manager ]
+[ Finance Manager ]
+[ HR Manager ]
+
+from the login page.
+
+====================================================
+13. AUTHORIZATION
+====================================================
+
+Authorization MUST happen on the backend.
+
+Do NOT rely only on:
+
+- hidden frontend buttons
+- frontend routes
+- local variables
+- client-side role checks
+
+Frontend checks may improve UX, but backend authorization
+is the actual security boundary.
+
+Every protected API/resource must verify:
+
+- authenticated user
+- role
+- permissions
+- organization
+- department scope
+- resource ownership where applicable
+
+Example:
+
+Muhammad:
+Role = Department Manager
+Department = IT
+
+Request:
+GET Finance private requests
+
+Backend:
+DENY
+
+Even if the user manually modifies a URL or API request,
+the backend must reject unauthorized access.
+
+====================================================
+14. ROLE + DEPARTMENT + PERMISSION MODEL
+====================================================
+
+Do not treat "role" as the only authorization factor.
+
+Use:
+
+USER
+    ↓
+ROLE
+    ↓
+PERMISSIONS
+    ↓
+ORGANIZATION SCOPE
+    ↓
+DEPARTMENT SCOPE
+    ↓
+RESOURCE ACCESS
+
+Example:
+
+Muhammad
+
+Role:
+Department Manager
+
+Department:
+IT
+
+Permissions:
+
+- view_department_requests
+- review_department_requests
+- assign_tasks
+- manage_department_tasks
+- view_department_reports
+
+Scope:
+
+IT Department
+
+Therefore Muhammad can manage IT operations but not Finance
+operations.
+
+====================================================
+15. DATABASE DESIGN
+====================================================
+
+Design a normalized database.
+
+At minimum consider entities such as:
+
+- organizations
+- users
+- roles
+- permissions
+- role_permissions
+- user_roles
+- departments
+- department_members
+- department_responsibilities
+- request_types
+- requests
+- request_statuses
+- workflows
+- workflow_steps
+- tasks
+- task_assignments
+- notifications
+- comments
+- documents
+- knowledge_items
+- audit_logs
+- AI conversations
+- AI messages
+
+Do NOT blindly create tables.
+
+First analyze relationships and cardinality.
+
+Use appropriate primary keys, foreign keys, indexes,
+constraints and timestamps.
+
+Prevent inconsistent relationships.
+
+====================================================
+16. REQUEST SYSTEM
+====================================================
+
+Requests must be configurable.
+
+Example:
+
+Employee submits:
+
+"Software Installation Request"
+
+The system identifies:
+
+Request Type:
+Software Installation
+
+Responsible Department:
+IT
+
+Workflow:
+IT Software Installation Workflow
+
+Then the request enters the appropriate workflow.
+
+The request should maintain:
+
+- creator
+- organization
+- department
+- request type
+- current status
+- current workflow step
+- assigned person where applicable
+- timestamps
+- history
+- comments
+- attachments where supported
+
+====================================================
+17. WORKFLOW ENGINE
+====================================================
+
+Do not hard-code every workflow.
+
+Create a configurable workflow system.
+
+Example:
+
+Expense Request:
+
+Employee
+    ↓
+Manager Review
+    ↓
+Finance Review
+    ↓
+Approval
+    ↓
+Completed
+
+Another organization may define:
+
+Employee
+    ↓
+Department Manager
+    ↓
+Director
+    ↓
+Completed
+
+The workflow engine should support configurable steps and transitions.
+
+====================================================
+18. DASHBOARDS
+====================================================
+
+Dashboards must be generated according to the authenticated
+user's role and organizational scope.
+
+Super Administrator:
+System/organization administration dashboard.
+
+Organization Administrator:
+Organization management dashboard.
+
+Department Manager:
+Department-specific operational dashboard.
+
+Employee:
+Personal work/request dashboard.
+
+Example:
+
+Muhammad
+Role = Department Manager
+Department = IT
+
+After login:
+
+IT Department Dashboard
+
+Show:
+
+- pending IT requests
+- active IT tasks
+- completed requests
+- team members
+- department activity
+- department performance
+- overdue activities
+- recent events
+
+Do NOT show Finance operational data unless explicitly authorized.
+
+====================================================
+19. DEPARTMENT CONTEXT
+====================================================
+
+The system must maintain department context.
+
+For example:
+
+IT Manager:
+
+Current department:
+IT
+
+Finance Manager:
+
+Current department:
+Finance
+
+The same application code handles both.
+
+The difference comes from database configuration,
+authorization and organizational data.
+
+Avoid creating separate applications for every department.
+
+====================================================
+20. MULTI-DEPARTMENT FUTURE SUPPORT
+====================================================
+
+Design the architecture so that a user can potentially have
+multiple roles or department assignments in the future.
+
+However, do NOT introduce unnecessary complexity into the first
+working version.
+
+Start with:
+
+Primary Role
++
+Primary Department
+
+Design the database so it can evolve later.
+
+====================================================
+21. PULSE AI
+====================================================
+
+Pulse AI is the built-in WorkPulse AI assistant.
+
+It should help users interact with organizational information
+and workflows using natural language.
+
+Example questions:
+
+"What is the status of my request?"
+
+"Who is handling my request?"
+
+"What does the IT department handle?"
+
+"Which department handles reimbursement?"
+
+"What tasks are currently assigned to me?"
+
+"How many IT requests are pending?"
+
+"Why is my request still waiting?"
+
+Pulse AI must NEVER bypass authorization.
+
+====================================================
+22. PULSE AI AUTHORIZATION
+====================================================
+
+This is a critical security requirement.
+
+Pulse AI must operate under the permissions of the authenticated
+user.
+
+Example:
+
+Muhammad:
+
+Role = Department Manager
+Department = IT
+
+If Muhammad asks:
+
+"Show me Finance's confidential requests."
+
+Pulse AI must NOT retrieve and reveal them merely because the
+AI technically has database access.
+
+The AI request must pass through an authorization layer.
+
+Conceptually:
+
+User
+ ↓
+Pulse AI
+ ↓
+Authorization Layer
+ ↓
+Allowed Data Scope
+ ↓
+Data Retrieval
+ ↓
+AI Response
+
+Never:
+
+User
+ ↓
+AI
+ ↓
+Full Database
+ ↓
+Answer
+
+====================================================
+23. PULSE AI KNOWLEDGE
+====================================================
+
+Pulse AI should be able to use structured WorkPulse information:
+
+- departments
+- responsibilities
+- request types
+- workflows
+- tasks
+- policies
+- authorized organizational data
+
+It may also support a controlled knowledge base containing
+organization-approved documents.
+
+Example:
+
+Finance policy
+Expense policy
+IT support procedure
+Leave policy
+
+AI answers must be grounded in authorized WorkPulse data
+and approved knowledge sources.
+
+Do not claim that the model has "learned" the organization's
+private data unless an actual training/fine-tuning process exists.
+
+Prefer retrieval/context-based AI architecture.
+
+====================================================
+24. AUDIT LOGGING
+====================================================
+
+Record important security and business events.
+
+Examples:
+
+- login
+- logout
+- failed login
+- user creation
+- role assignment
+- department creation
+- manager assignment
+- permission change
+- request creation
+- request approval
+- request rejection
+- task assignment
+- workflow transition
+- administrative changes
+
+Audit logs should include:
+
+- actor
+- action
+- target/resource
+- timestamp
+- relevant metadata
+
+Users must not be able to modify audit records through normal
+application interfaces.
+
+====================================================
+25. NOTIFICATIONS
+====================================================
+
+Create a notification system.
+
+Examples:
+
+Employee:
+"Your request has been approved."
+
+Manager:
+"New IT request requires review."
+
+Employee:
+"A task has been assigned to you."
+
+Manager:
+"An IT request is overdue."
+
+Notifications must respect organizational scope.
+
+====================================================
+26. ANALYTICS
+====================================================
+
+Provide useful operational analytics.
+
+Examples:
+
+- request volume
+- completed requests
+- pending requests
+- rejected requests
+- average processing time
+- overdue requests
+- department activity
+- employee workload
+- task completion
+- workflow bottlenecks
+
+Do not create meaningless charts simply to make the dashboard
+look impressive.
+
+Every metric should have an operational purpose.
+
+====================================================
+27. SECURITY
+====================================================
+
+Implement:
+
+- password hashing
+- secure authentication
+- backend authorization
+- input validation
+- server-side validation
+- access control
+- protected API endpoints
+- secure session/token handling
+- audit logging
+- safe error handling
+- protection against unauthorized resource access
+
+Never expose sensitive information unnecessarily.
+
+Never store plaintext passwords.
+
+====================================================
+28. FRONTEND PRINCIPLE
+====================================================
+
+The frontend should reflect backend authorization.
+
+Users should see only features relevant to their permissions.
+
+However:
+
+Frontend restrictions are NOT security.
+
+Backend authorization is mandatory.
+
+====================================================
+29. UI/UX
+====================================================
+
+Create a professional modern enterprise interface.
+
+Requirements:
+
+- clean layout
+- responsive design
+- accessible navigation
+- clear status indicators
+- consistent components
+- useful empty states
+- loading states
+- error states
+- confirmation dialogs
+- mobile responsiveness where applicable
+
+Avoid excessive visual effects.
+
+Prioritize usability.
+
+====================================================
+30. DEVELOPMENT METHODOLOGY
+====================================================
+
+Do NOT immediately start generating large amounts of code.
+
+First:
+
+1. Inspect the existing project
+2. Inspect installed tools
+3. Inspect project structure
+4. Detect the existing technology stack
+5. Identify missing dependencies
+6. Identify configuration problems
+7. Propose architecture
+8. Confirm assumptions internally
+9. Create implementation plan
+
+Then develop incrementally.
+
+====================================================
+31. DEVELOPMENT PHASES
+====================================================
+
+PHASE 1
+Project analysis and environment setup
+
+PHASE 2
+Architecture and database design
+
+PHASE 3
+Authentication
+
+PHASE 4
+Users, roles and permissions
+
+PHASE 5
+Organizations and departments
+
+PHASE 6
+Department configuration
+
+PHASE 7
+Requests and request types
+
+PHASE 8
+Workflow engine
+
+PHASE 9
+Tasks and assignments
+
+PHASE 10
+Role-specific dashboards
+
+PHASE 11
+Notifications
+
+PHASE 12
+Audit logging
+
+PHASE 13
+Analytics
+
+PHASE 14
+Knowledge management
+
+PHASE 15
+Pulse AI
+
+PHASE 16
+Security hardening
+
+PHASE 17
+Testing
+
+PHASE 18
+Deployment
+
+PHASE 19
+Documentation
+
+====================================================
+32. DEVELOPMENT RULE
+====================================================
+
+Do not build disconnected features.
+
+Every feature must connect to the underlying data model.
+
+For example:
+
+Creating a department must affect:
+
+- department database record
+- manager assignment
+- employee membership
+- responsibilities
+- request routing
+- workflow routing
+- dashboard scope
+- permissions
+- Pulse AI context where appropriate
+
+Likewise, assigning a manager must affect:
+
+- user's role
+- department assignment
+- dashboard
+- permissions
+- request visibility
+- task management
+- department analytics
+
+====================================================
+33. EXAMPLE COMPLETE FLOW
+====================================================
+
+Demonstrate this complete scenario during development/testing:
+
+1. Super Admin logs in.
+
+2. Super Admin creates:
+   IT Department.
+
+3. Super Admin defines:
+
+   Responsibilities:
+   - Technical Support
+   - Software Management
+   - Account Management
+
+4. Super Admin creates/configures:
+
+   Request Types:
+   - Technical Support
+   - Software Installation
+   - Account Access
+
+5. Super Admin selects registered user:
+
+   Muhammad
+
+6. Super Admin assigns:
+
+   Role:
+   Department Manager
+
+   Department:
+   IT
+
+7. Muhammad logs in.
+
+8. Backend authenticates Muhammad.
+
+9. Backend determines:
+
+   Role = Department Manager
+   Department = IT
+
+10. WorkPulse loads:
+
+    IT Department Manager Dashboard
+
+11. An employee submits:
+
+    Software Installation Request
+
+12. WorkPulse routes the request to:
+
+    IT Department
+
+13. Muhammad sees the request.
+
+14. Muhammad assigns the task to an IT employee.
+
+15. Employee works on the task.
+
+16. Employee updates the task.
+
+17. Muhammad reviews the result.
+
+18. Request becomes completed.
+
+19. All important events are recorded in the audit log.
+
+20. Muhammad can ask Pulse AI:
+
+    "How many IT requests are currently pending?"
+
+21. Pulse AI retrieves only data Muhammad is authorized to access.
+
+22. Pulse AI responds with the relevant information.
+
+====================================================
+34. NO FAKE FUNCTIONALITY
+====================================================
+
+Do not create buttons that do nothing.
+
+Do not create fake dashboards with hard-coded numbers.
+
+Do not hard-code fake users into production logic.
+
+Do not hard-code fake requests.
+
+Do not simulate backend authorization only in the UI.
+
+Do not claim an AI feature works if it is only a static chatbot.
+
+Every implemented feature must have a real underlying workflow.
+
+====================================================
+35. NO UNNECESSARY COMPLEXITY
+====================================================
+
+This project is being developed by a single developer.
+
+Prioritize:
+
+- correctness
+- security
+- maintainability
+- usability
+- realistic scope
+
+Do not add features simply because they sound impressive.
+
+Every feature must have a clear purpose.
+
+====================================================
+36. DOCUMENTATION
+====================================================
+
+Maintain documentation throughout development.
+
+Document:
+
+- problem statement
+- objectives
+- requirements
+- use cases
+- architecture
+- database design
+- ER diagram
+- authorization model
+- workflow design
+- UI design
+- implementation
+- testing
+- security
+- AI architecture
+- limitations
+- future improvements
+
+The final system should be defensible academically and technically.
+
+====================================================
+37. FINAL QUALITY STANDARD
+====================================================
+
+Before considering WorkPulse complete, verify:
+
+[ ] Authentication works
+[ ] Roles are backend-controlled
+[ ] Permissions are backend-enforced
+[ ] Departments are configurable
+[ ] Managers are assigned through authorized administration
+[ ] Users are assigned to departments
+[ ] Department scope is enforced
+[ ] Requests are configurable
+[ ] Requests route to appropriate departments
+[ ] Workflows function correctly
+[ ] Tasks can be assigned
+[ ] Dashboards reflect actual database data
+[ ] Notifications work
+[ ] Audit logs work
+[ ] Analytics use real data
+[ ] Pulse AI respects authorization
+[ ] AI responses are grounded in authorized information
+[ ] Security controls are implemented
+[ ] Errors are handled properly
+[ ] Application is tested
+[ ] Documentation is complete
+
+====================================================
+38. CRITICAL DEVELOPMENT INSTRUCTION
+====================================================
+
+When you encounter a design decision, prioritize:
+
+1. Security
+2. Correctness
+3. Data integrity
+4. Maintainability
+5. User experience
+6. Scalability
+7. Visual polish
+
+Do not sacrifice backend correctness merely to make the UI look
+impressive.
+
+Do not implement role-based access control as frontend-only logic.
+
+Do not bypass authorization for Pulse AI.
+
+Do not hard-code organizational structures.
+
+Build WorkPulse as a coherent configurable organizational platform.
+
+====================================================
+END OF MASTER PROMPT
+====================================================
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-10-02T06:51:18-07:00.
+
+The user's current state is as follows:
+Active Document: c:\Users\MUHAMMAD\Desktop\WorkPulse\frontend\vite.config.ts (LANGUAGE_TYPESCRIPT)
+Cursor is on line: 1
+Other open documents:
+- c:\Users\MUHAMMAD\Desktop\WorkPulse\frontend\package.json (LANGUAGE_JSON)
+- c:\Users\MUHAMMAD\Desktop\WorkPulse\frontend\src\components\radar\PendingRadar.tsx (LANGUAGE_TSX)
+- c:\Users\MUHAMMAD\Desktop\WorkPulse\frontend\src\components\layout\Navbar.tsx (LANGUAGE_TSX)
+- c:\Users\MUHAMMAD\Desktop\WorkPulse\frontend\index.html (LANGUAGE_HTML)
+- c:\Users\MUHAMMAD\Desktop\WorkPulse\backend\src\repositories\index.ts (LANGUAGE_TYPESCRIPT)
+</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>
+The user changed setting `Model Selection` from None to Gemini 3.8 Flash (High). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+</USER_SETTINGS_CHANGE>
