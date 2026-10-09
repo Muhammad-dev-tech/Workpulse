@@ -103,18 +103,21 @@ For rapid testing or examination grading, the login page includes a collapsible 
 
 ## 4. Step-by-Step Feature Walkthroughs
 
-### Walkthrough 1: One-Click Guided Section 33 Scenario Bar
-At the very top of the web interface (`http://localhost:3000`), WorkPulse provides an interactive **Section 33 Scenario Controller Bar**:
-1. Click **"Run Full Demo"** or click individual steps:
-   - **Step 1**: Logs in as Super Admin and creates the IT Department with responsibilities and request types.
-   - **Step 2**: Assigns **Muhammad Tariq** as the IT Department Manager.
-   - **Step 3**: Switches session to Muhammad and verifies the IT Manager Dashboard.
-   - **Step 4**: Logs in as Aisha Patel and submits a *Software Installation Request*.
-   - **Step 5**: Switches to Muhammad and delegates task `TSK-201` to technician **Ahmed Khan**.
-   - **Step 6**: Switches to Ahmed, updates task status to `IN_PROGRESS` and then `DONE` with resolution notes.
-   - **Step 7**: Muhammad verifies completion and closes the request.
-   - **Step 8**: Verifies the immutable audit trail and triggers Pulse AI.
-2. Watch the live status badges, persona badges, and data refresh automatically!
+### Walkthrough 1: Live Manual Organization & Department Configuration
+As a real enterprise product, all configurations are managed directly through the live UI:
+1. **Log in as Super Admin**: (or create your own account using the **Create Account** tab).
+2. **Navigate to "Departments"**: Click **Department Setup** on the left sidebar.
+3. **Click "+ Create Department"**:
+   - Provide Name (e.g. `Information Technology`, `Computer Science`, `Procurement`).
+   - Code (e.g. `IT`, `CS`, `PROC`).
+   - Responsibilities (e.g. `Technical Support`, `Software Management`, `System Access`).
+   - Request Types (e.g. `Software Installation`, `Course Rectification`).
+   - Task Types (e.g. `Diagnose issue`, `Update database record`).
+4. **Assign Department Manager**:
+   - In the department modal or list, select an enrolled user (e.g., `Muhammad Tariq`) and designate them as **Department Manager**.
+   - The backend updates the database and immediately binds that user to the department with `MANAGER` role scoping.
+5. **Log in as the Manager**:
+   - Notice the dashboard instantly adapts: the Manager sees their department workload, queue, and technician assignments.
 
 ---
 

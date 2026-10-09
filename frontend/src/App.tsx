@@ -9,7 +9,6 @@ import { CreateRequestModal } from './components/requests/CreateRequestModal';
 import { CreateDepartmentModal } from './components/departments/CreateDepartmentModal';
 import { TaskListView } from './components/tasks/TaskListView';
 import { AuditLogView } from './components/audit/AuditLogView';
-import { Section33ScenarioBar } from './components/guided/Section33ScenarioBar';
 import { PulseAiDrawer } from './components/ai/PulseAiDrawer';
 import { AuthPage } from './components/auth/AuthPage';
 import { RequestItem, PendingRadarData, UserPersona, Department, TaskItem } from './types';
@@ -240,16 +239,6 @@ export const App: React.FC = () => {
         onOpenRequest={handleOpenDetails}
         onLogout={handleLogout}
         onResetData={handleResetData}
-      />
-
-      {/* Section 33 Interactive Scenario Controller Bar */}
-      <Section33ScenarioBar
-        currentUser={currentUser}
-        personas={personas}
-        onSwitchPersona={switchPersona}
-        onRefreshData={refreshData}
-        onOpenPulseAiWithPrompt={handleOpenPulseAiWithPrompt}
-        onOpenRequest={handleOpenDetails}
       />
 
       <div className="flex flex-1 min-h-0">
