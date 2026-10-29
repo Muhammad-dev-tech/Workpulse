@@ -1,10 +1,30 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { userRepository, organizationRepository, auditRepository, wipeOrgData } from '../repositories';
+import { userRepository, organizationRepository, departmentRepository, auditRepository, wipeOrgData } from '../repositories';
 import { generateToken, requireAuthentication, AuthenticatedRequest } from '../middleware/auth';
-import { UserRole } from '../types';
+import { User, UserRole } from '../types';
+import { ORGANIZATION_TYPES, normalizeOrgType, inferOrgTypeFromName } from '../config/terminology';
+import { getFacultyForDean } from './departmentRoutes';
 
 const router = Router();
+
+/** Public user shape returned to the client, enriched with org context. */
+async function toSessionUser(user: User) {
+  const org = await organizationRepository.findById(user.organizationId);
+  const faculty = getFacultyForDean(user.organizationId, user.id, user.faculty);
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    departmentId: user.departmentId,
+    faculty,
+    organizationId: user.organizationId,
+    organizationName: org?.name,
+    organizationType: normalizeOrgType(org?.orgType),
+    avatarUrl: user.avatarUrl
+  };
+}
 
 // ──────────────────────────────────────────────────────────────────────
 //  GET /api/auth/organizations — list available organizations for registration
@@ -18,7 +38,8 @@ router.get('/organizations', async (req, res: Response) => {
         id: o.id,
         name: o.name,
         slug: o.slug,
-        plan: o.plan
+        plan: o.plan,
+        orgType: normalizeOrgType(o.orgType)
       }))
     });
   } catch (err: any) {
@@ -30,10 +51,37 @@ router.get('/organizations', async (req, res: Response) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────
+//  GET /api/auth/departments — list departments for an organization during registration
+// ──────────────────────────────────────────────────────────────────────
+router.get('/departments', async (req, res: Response) => {
+  try {
+    const orgId = req.query.organizationId as string;
+    if (!orgId) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+    const depts = await departmentRepository.findAll(orgId);
+    res.json({
+      success: true,
+      data: depts.map(d => ({
+        id: d.id,
+        name: d.name,
+        code: d.code
+      }))
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'FETCH_DEPTS_FAILED', message: err.message || 'Failed to list departments.' }
+    });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────
 //  POST /api/auth/register — sign up a new user or new organization admin
 // ──────────────────────────────────────────────────────────────────────
 router.post('/register', async (req, res: Response) => {
-  const { name, email, password, organizationName, organizationId } = req.body;
+  const { name, email, password, organizationName, organizationType, organizationId, role, departmentId } = req.body;
 
   if (!name || !name.trim()) {
     res.status(400).json({
@@ -75,9 +123,26 @@ router.post('/register', async (req, res: Response) => {
 
     if (organizationName && organizationName.trim()) {
       // User is creating a brand new Organization -> Becomes Super Admin!
-      const newOrg = await organizationRepository.create({ name: organizationName.trim() });
+      if (organizationType && !(ORGANIZATION_TYPES as string[]).includes(organizationType)) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_ORG_TYPE', message: 'Please choose a valid organization type.' }
+        });
+        return;
+      }
+      let resolvedOrgType = normalizeOrgType(organizationType);
+      if (resolvedOrgType === 'COMPANY') {
+        const inferred = inferOrgTypeFromName(organizationName);
+        if (inferred !== 'COMPANY') {
+          resolvedOrgType = inferred;
+        }
+      }
+      const newOrg = await organizationRepository.create({
+        name: organizationName.trim(),
+        orgType: resolvedOrgType
+      });
       targetOrgId = newOrg.id;
-      assignedRole = 'SUPER_ADMIN';
+      assignedRole = 'ORG_ADMIN';
     } else if (organizationId) {
       const existingOrg = await organizationRepository.findById(organizationId);
       if (!existingOrg) {
@@ -88,10 +153,15 @@ router.post('/register', async (req, res: Response) => {
         return;
       }
       targetOrgId = existingOrg.id;
-      // If no users exist yet in this org, make this user admin
+      // If no users exist yet in this org, make this user org admin
       const orgUsers = await userRepository.findAll(targetOrgId);
       if (orgUsers.length === 0) {
-        assignedRole = 'SUPER_ADMIN';
+        assignedRole = 'ORG_ADMIN';
+      } else {
+        // Enforce bottom hierarchy rule: every member joining an existing organization
+        // enters at the bottom tier (EMPLOYEE = Staff in University, Employee in Company).
+        // The Org Admin appoints representatives and elevated roles.
+        assignedRole = 'EMPLOYEE';
       }
     } else {
       // Fallback: check all organizations
@@ -99,14 +169,21 @@ router.post('/register', async (req, res: Response) => {
       if (allOrgs.length === 0) {
         const defaultOrg = await organizationRepository.create({ name: 'My Organization' });
         targetOrgId = defaultOrg.id;
-        assignedRole = 'SUPER_ADMIN';
+        assignedRole = 'ORG_ADMIN';
       } else {
         targetOrgId = allOrgs[0].id;
         const orgUsers = await userRepository.findAll(targetOrgId);
         if (orgUsers.length === 0) {
-          assignedRole = 'SUPER_ADMIN';
+          assignedRole = 'ORG_ADMIN';
+        } else {
+          assignedRole = 'EMPLOYEE';
         }
       }
+    }
+
+    // Platform Security Rule: admin@acme.com is the ONLY account permitted as overall platform SUPER_ADMIN
+    if (cleanEmail === 'admin@acme.com') {
+      assignedRole = 'SUPER_ADMIN';
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -115,6 +192,7 @@ router.post('/register', async (req, res: Response) => {
       email: cleanEmail,
       passwordHash,
       role: assignedRole,
+      departmentId: departmentId || undefined,
       organizationId: targetOrgId,
       avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name.trim())}`
     });
@@ -137,15 +215,7 @@ router.post('/register', async (req, res: Response) => {
     res.status(201).json({
       success: true,
       data: {
-        user: {
-          id: newUser.id,
-          name: newUser.name,
-          email: newUser.email,
-          role: newUser.role,
-          departmentId: newUser.departmentId,
-          organizationId: newUser.organizationId,
-          avatarUrl: newUser.avatarUrl
-        },
+        user: await toSessionUser(newUser),
         token
       }
     });
@@ -208,15 +278,7 @@ router.post('/login', async (req, res: Response) => {
   res.json({
     success: true,
     data: {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        departmentId: user.departmentId,
-        organizationId: user.organizationId,
-        avatarUrl: user.avatarUrl
-      },
+      user: await toSessionUser(user),
       token
     }
   });
@@ -225,19 +287,10 @@ router.post('/login', async (req, res: Response) => {
 // ──────────────────────────────────────────────────────────────────────
 //  GET /api/auth/me  — return current session user
 // ──────────────────────────────────────────────────────────────────────
-router.get('/me', requireAuthentication, (req: AuthenticatedRequest, res: Response) => {
-  const u = req.user!;
+router.get('/me', requireAuthentication, async (req: AuthenticatedRequest, res: Response) => {
   res.json({
     success: true,
-    data: {
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      role: u.role,
-      departmentId: u.departmentId,
-      organizationId: u.organizationId,
-      avatarUrl: u.avatarUrl
-    }
+    data: await toSessionUser(req.user!)
   });
 });
 
@@ -280,10 +333,10 @@ router.post('/reset-data', requireAuthentication, async (req: AuthenticatedReque
 });
 
 // ──────────────────────────────────────────────────────────────────────
-//  GET /api/auth/personas  — list users for demonstration switch
+//  GET /api/auth/personas  — list members of the signed-in user's organization
 // ──────────────────────────────────────────────────────────────────────
-router.get('/personas', async (req, res: Response) => {
-  const users = await userRepository.findAll('org-acme-1');
+router.get('/personas', requireAuthentication, async (req: AuthenticatedRequest, res: Response) => {
+  const users = await userRepository.findAll(req.user!.organizationId);
   res.json({
     success: true,
     data: users.map(u => ({
@@ -292,6 +345,7 @@ router.get('/personas', async (req, res: Response) => {
       email: u.email,
       role: u.role,
       departmentId: u.departmentId,
+      faculty: getFacultyForDean(u.organizationId, u.id, u.faculty),
       avatarUrl: u.avatarUrl
     }))
   });

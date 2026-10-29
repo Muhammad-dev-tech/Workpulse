@@ -25,6 +25,7 @@ import {
   INotificationRepository,
   IAuditRepository
 } from './interfaces';
+import { inferOrgTypeFromName } from '../config/terminology';
 
 // ────────────────────────────────────────────────────
 //  Supabase client (singleton)
@@ -72,23 +73,62 @@ async function assembleDepartment(
     .select('*')
     .eq('department_id', deptRow.id);
 
-  const requestTypes: DepartmentRequestType[] = (rtRows || []).map(r => ({
-    id: r.id,
-    name: r.name,
-    description: r.description,
-    defaultPriority: r.default_priority,
-    defaultWorkflowId: r.default_workflow_id,
-    approvalPolicy: r.approval_policy,
-    requiresApproval: r.requires_approval,
-    slaHours: r.sla_hours
-  }));
+  const requestTypes: DepartmentRequestType[] = (rtRows || []).map(r => {
+    let approvalPolicy = r.approval_policy || undefined;
+    let requiresApproval = r.requires_approval || false;
+    let slaHours = r.sla_hours || 48;
+    let description = r.description || '';
+
+    if (r.description && (r.description.startsWith('{') || r.description.startsWith('__WP_META__:'))) {
+      try {
+        const raw = r.description.startsWith('__WP_META__:')
+          ? r.description.substring('__WP_META__:'.length)
+          : r.description;
+        const meta = JSON.parse(raw);
+        if (meta.approvalPolicy) approvalPolicy = meta.approvalPolicy;
+        if (meta.requiresApproval !== undefined) requiresApproval = meta.requiresApproval;
+        if (meta.slaHours !== undefined) slaHours = meta.slaHours;
+        description = meta.text || '';
+      } catch {}
+    }
+
+    return {
+      id: r.id,
+      name: r.name,
+      description,
+      defaultPriority: r.default_priority,
+      defaultWorkflowId: r.default_workflow_id,
+      approvalPolicy,
+      requiresApproval,
+      slaHours
+    };
+  });
+
+  let faculty = deptRow.faculty;
+  let approvalPolicy = deptRow.approval_policy || 'DIRECT';
+  let description = deptRow.description || '';
+
+  if (description && (description.startsWith('{') || description.startsWith('__WP_META__:'))) {
+    try {
+      const raw = description.startsWith('__WP_META__:')
+        ? description.substring('__WP_META__:'.length)
+        : description;
+      const meta = JSON.parse(raw);
+      if (meta.faculty) faculty = meta.faculty;
+      if (meta.approvalPolicy) approvalPolicy = meta.approvalPolicy;
+      description = meta.text !== undefined ? meta.text : description;
+    } catch {}
+  }
 
   return {
     id: deptRow.id,
     organizationId: deptRow.organization_id,
     name: deptRow.name,
     code: deptRow.code,
-    description: deptRow.description || '',
+    description,
+    faculty,
+    approvalPolicy,
+    requiresApproval: approvalPolicy !== 'DIRECT',
     managerId: deptRow.manager_id,
     managerName: deptRow.manager_name,
     responsibilities: deptRow.responsibilities || [],
@@ -187,8 +227,20 @@ async function assembleRequest(
     description: reqRow.description,
     priority: reqRow.priority,
     status: reqRow.status,
-    approvalPolicy: reqRow.approval_policy,
-    waitingOn: reqRow.waiting_on,
+    approvalPolicy: (
+      reqRow.approval_policy === 'MULTI_TIER_CHAIN' ||
+      approvals.some(a => a.stepId?.startsWith('tier-')) ||
+      (reqRow.current_step_name && /step \d of \d|tier/i.test(reqRow.current_step_name))
+    ) ? 'MULTI_TIER_CHAIN' : (
+      reqRow.approval_policy === 'EXECUTIVE_ONLY' ||
+      approvals.some(a => a.stepId === 'approval-exec')
+    ) ? 'EXECUTIVE_ONLY' : (
+      reqRow.approval_policy === 'DEAN' ||
+      approvals.some(a => a.stepId === 'approval-dean')
+    ) ? 'DEAN' : (
+      reqRow.approval_policy === 'DEPT_MANAGER' ||
+      approvals.some(a => a.stepId === 'approval-manager')
+    ) ? 'DEPT_MANAGER' : (reqRow.approval_policy || 'DIRECT'),
     waitingSince: reqRow.waiting_since,
     dueDate: reqRow.due_date,
     completedAt: reqRow.completed_at,
@@ -275,7 +327,10 @@ export class SupabaseRequestRepository implements IRequestRepository {
     isOverdue?: boolean;
     isWaiting?: boolean;
   }): Promise<RequestItem[]> {
-    let q = this.db.from('requests').select('*').eq('organization_id', organizationId);
+    let q = this.db.from('requests').select('*');
+    if (organizationId && organizationId !== 'ALL') {
+      q = q.eq('organization_id', organizationId);
+    }
 
     if (filters?.status)      q = q.eq('status', filters.status);
     if (filters?.departmentId) q = q.eq('department_id', filters.departmentId);
@@ -307,6 +362,18 @@ export class SupabaseRequestRepository implements IRequestRepository {
     const reqId = `REQ-${seq}`;
     const now = new Date().toISOString();
 
+    let validWorkflowTemplateId: string | null = null;
+    if (data.workflowTemplateId) {
+      const { data: wfRow } = await this.db
+        .from('workflow_templates')
+        .select('id')
+        .eq('id', data.workflowTemplateId)
+        .maybeSingle();
+      if (wfRow) {
+        validWorkflowTemplateId = wfRow.id;
+      }
+    }
+
     const insertPayload: Record<string, any> = {
       request_id: reqId,
       organization_id: data.organizationId,
@@ -318,7 +385,7 @@ export class SupabaseRequestRepository implements IRequestRepository {
       request_type_name: data.requestTypeName,
       current_step_id: data.currentStepId,
       current_step_name: data.currentStepName,
-      workflow_template_id: data.workflowTemplateId,
+      workflow_template_id: validWorkflowTemplateId,
       assignee_id: data.assigneeId,
       assignee_name: data.assigneeName,
       title: data.title,
@@ -341,6 +408,17 @@ export class SupabaseRequestRepository implements IRequestRepository {
       const retry = await this.db
         .from('requests')
         .insert(insertPayload)
+        .select()
+        .single();
+      row = retry.data;
+      error = retry.error;
+    }
+
+    if (error && /workflow_template_id/i.test(error.message)) {
+      const retryPayload = { ...insertPayload, workflow_template_id: null };
+      const retry = await this.db
+        .from('requests')
+        .insert(retryPayload)
         .select()
         .single();
       row = retry.data;
@@ -628,7 +706,10 @@ export class SupabaseTaskRepository implements ITaskRepository {
     requestId?: string;
     status?: string;
   }): Promise<TaskItem[]> {
-    let q = this.db.from('tasks').select('*').eq('organization_id', organizationId);
+    let q = this.db.from('tasks').select('*');
+    if (organizationId && organizationId !== 'ALL') {
+      q = q.eq('organization_id', organizationId);
+    }
     if (filters?.departmentId) q = q.eq('department_id', filters.departmentId);
     if (filters?.assigneeId)   q = q.eq('assignee_id', filters.assigneeId);
     if (filters?.requestId)    q = q.eq('request_id', filters.requestId);
@@ -771,11 +852,11 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
   private db = getSupabaseClient();
 
   async findAll(organizationId: string): Promise<Department[]> {
-    const { data, error } = await this.db
-      .from('departments')
-      .select('*')
-      .eq('organization_id', organizationId)
-      .order('created_at', { ascending: true });
+    let q = this.db.from('departments').select('*');
+    if (organizationId && organizationId !== 'ALL') {
+      q = q.eq('organization_id', organizationId);
+    }
+    const { data, error } = await q.order('created_at', { ascending: true });
     if (error || !data) return [];
     return Promise.all(data.map(r => assembleDepartment(this.db, r)));
   }
@@ -793,6 +874,12 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
 
   async create(organizationId: string, data: Omit<Department, 'id' | 'createdAt' | 'organizationId'>): Promise<Department> {
     const code = data.code.toUpperCase();
+    const effectivePolicy = data.approvalPolicy || (data.requiresApproval ? 'APPROVAL_REQUIRED' : 'DIRECT');
+    const metaDesc = `__WP_META__:${JSON.stringify({
+      text: data.description || '',
+      faculty: data.faculty,
+      approvalPolicy: effectivePolicy
+    })}`;
 
     const { data: row, error } = await this.db
       .from('departments')
@@ -800,7 +887,7 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
         organization_id: organizationId,
         name: data.name,
         code,
-        description: data.description,
+        description: metaDesc,
         manager_id: data.managerId,
         manager_name: data.managerName,
         responsibilities: data.responsibilities || [],
@@ -817,14 +904,19 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
       const rtRows = data.requestTypes.map(rt => ({
         department_id: row.id,
         name: rt.name,
-        description: rt.description,
-        default_priority: rt.defaultPriority,
-        default_workflow_id: rt.defaultWorkflowId,
-        approval_policy: rt.approvalPolicy || 'DIRECT',
-        requires_approval: rt.requiresApproval || false,
-        sla_hours: (rt as any).slaHours || 48
+        description: JSON.stringify({
+          approvalPolicy: rt.approvalPolicy || (rt.requiresApproval ? 'MULTI_TIER_CHAIN' : 'DIRECT'),
+          requiresApproval: rt.approvalPolicy && rt.approvalPolicy !== 'DIRECT' ? true : (rt.requiresApproval || false),
+          slaHours: (rt as any).slaHours || 48,
+          text: rt.description || ''
+        }),
+        default_priority: rt.defaultPriority || 'MEDIUM',
+        default_workflow_id: rt.defaultWorkflowId || null
       }));
-      await this.db.from('department_request_types').insert(rtRows);
+      const { error: rtErr } = await this.db.from('department_request_types').insert(rtRows);
+      if (rtErr) {
+        console.error('Failed to insert department_request_types:', rtErr);
+      }
     }
 
     // If manager assigned, update user record
@@ -841,7 +933,13 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
   async update(organizationId: string, id: string, data: Partial<Department>): Promise<Department | null> {
     const patch: Record<string, any> = {};
     if (data.name !== undefined)            patch['name'] = data.name;
-    if (data.description !== undefined)     patch['description'] = data.description;
+    if (data.description !== undefined || data.faculty !== undefined || data.approvalPolicy !== undefined) {
+      const existing = await this.findById(organizationId, id);
+      const text = data.description !== undefined ? data.description : (existing?.description || '');
+      const faculty = data.faculty !== undefined ? data.faculty : existing?.faculty;
+      const approvalPolicy = data.approvalPolicy !== undefined ? data.approvalPolicy : existing?.approvalPolicy;
+      patch['description'] = `__WP_META__:${JSON.stringify({ text, faculty, approvalPolicy })}`;
+    }
     if (data.responsibilities !== undefined) patch['responsibilities'] = data.responsibilities;
     if (data.taskTypes !== undefined)       patch['task_types'] = data.taskTypes;
     if (data.employeeIds !== undefined)     patch['employee_ids'] = data.employeeIds;
@@ -864,11 +962,19 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
         const rtRows = data.requestTypes.map(rt => ({
           department_id: id,
           name: rt.name,
-          description: rt.description,
-          default_priority: rt.defaultPriority,
-          default_workflow_id: rt.defaultWorkflowId
+          description: JSON.stringify({
+            approvalPolicy: rt.approvalPolicy || (rt.requiresApproval ? 'MULTI_TIER_CHAIN' : 'DIRECT'),
+            requiresApproval: rt.approvalPolicy && rt.approvalPolicy !== 'DIRECT' ? true : (rt.requiresApproval || false),
+            slaHours: (rt as any).slaHours || 48,
+            text: rt.description || ''
+          }),
+          default_priority: rt.defaultPriority || 'MEDIUM',
+          default_workflow_id: rt.defaultWorkflowId || null
         }));
-        await this.db.from('department_request_types').insert(rtRows);
+        const { error: rtErr } = await this.db.from('department_request_types').insert(rtRows);
+        if (rtErr) {
+          console.error('Failed to update department_request_types:', rtErr);
+        }
       }
     }
 
@@ -876,6 +982,14 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
   }
 
   async assignManager(organizationId: string, departmentId: string, managerId: string, managerName: string): Promise<Department | null> {
+    const current = await this.findById(organizationId, departmentId);
+    if (current && current.managerId && current.managerId !== managerId) {
+      await this.db
+        .from('users')
+        .update({ role: 'EMPLOYEE' })
+        .eq('id', current.managerId);
+    }
+
     const { error } = await this.db
       .from('departments')
       .update({ manager_id: managerId, manager_name: managerName })
@@ -891,6 +1005,25 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
 
     return this.findById(organizationId, departmentId);
   }
+
+  async vacateManager(organizationId: string, departmentId: string): Promise<Department | null> {
+    const current = await this.findById(organizationId, departmentId);
+    if (current && current.managerId) {
+      await this.db
+        .from('users')
+        .update({ role: 'EMPLOYEE' })
+        .eq('id', current.managerId);
+    }
+
+    const { error } = await this.db
+      .from('departments')
+      .update({ manager_id: null, manager_name: null })
+      .eq('organization_id', organizationId)
+      .eq('id', departmentId);
+    if (error) return null;
+
+    return this.findById(organizationId, departmentId);
+  }
 }
 
 // ────────────────────────────────────────────────────
@@ -900,15 +1033,30 @@ export class SupabaseUserRepository implements IUserRepository {
   private db = getSupabaseClient();
 
   private mapUser(row: Record<string, any>): User {
+    let effectiveRole = row.role;
+    let cleanAvatar = row.avatar_url;
+    let faculty = row.faculty || undefined;
+    if (row.avatar_url && typeof row.avatar_url === 'string' && row.avatar_url.includes('#')) {
+      const [baseUrl, hash] = row.avatar_url.split('#');
+      cleanAvatar = baseUrl || null;
+      const params = new URLSearchParams(hash);
+      if (params.get('role')) {
+        effectiveRole = params.get('role') as any;
+      }
+      if (params.get('faculty')) {
+        faculty = decodeURIComponent(params.get('faculty')!);
+      }
+    }
     return {
       id: row.id,
       organizationId: row.organization_id,
       departmentId: row.department_id,
+      faculty,
       email: row.email,
       passwordHash: row.password_hash,
       name: row.name,
-      role: row.role,
-      avatarUrl: row.avatar_url,
+      role: effectiveRole,
+      avatarUrl: cleanAvatar,
       createdAt: row.created_at
     };
   }
@@ -934,16 +1082,22 @@ export class SupabaseUserRepository implements IUserRepository {
   }
 
   async findAll(organizationId: string): Promise<User[]> {
-    const { data, error } = await this.db
-      .from('users')
-      .select('*')
-      .eq('organization_id', organizationId)
-      .order('name', { ascending: true });
+    let q = this.db.from('users').select('*');
+    if (organizationId && organizationId !== 'ALL') {
+      q = q.eq('organization_id', organizationId);
+    }
+    const { data, error } = await q.order('name', { ascending: true });
     if (error || !data) return [];
     return data.map(r => this.mapUser(r));
   }
 
   async create(user: Omit<User, 'id' | 'createdAt'>): Promise<User> {
+    const isCustomRole = user.role === 'DEAN';
+    const dbRole = isCustomRole ? 'ORG_ADMIN' : user.role;
+    const dbAvatarUrl = isCustomRole
+      ? (user.avatarUrl ? `${user.avatarUrl}#role=DEAN` : `#role=DEAN`)
+      : (user.avatarUrl || null);
+
     const { data, error } = await this.db
       .from('users')
       .insert({
@@ -952,8 +1106,8 @@ export class SupabaseUserRepository implements IUserRepository {
         email: user.email,
         password_hash: user.passwordHash,
         name: user.name,
-        role: user.role,
-        avatar_url: user.avatarUrl || null
+        role: dbRole,
+        avatar_url: dbAvatarUrl
       })
       .select()
       .single();
@@ -964,8 +1118,23 @@ export class SupabaseUserRepository implements IUserRepository {
     return this.mapUser(data);
   }
 
-  async updateRoleAndDepartment(userId: string, role: User['role'], departmentId?: string): Promise<User | null> {
-    const patch: Record<string, any> = { role };
+  async updateRoleAndDepartment(userId: string, role: User['role'], departmentId?: string, faculty?: string): Promise<User | null> {
+    const isCustomRole = role === 'DEAN';
+    const dbRole = isCustomRole ? 'ORG_ADMIN' : role;
+    const existing = await this.findById(userId);
+    let avatarUrl = existing?.avatarUrl || null;
+    if (avatarUrl && avatarUrl.includes('#')) {
+      avatarUrl = avatarUrl.split('#')[0] || null;
+    }
+    const tags: string[] = [];
+    if (isCustomRole) tags.push(`role=DEAN`);
+    const effectiveFaculty = faculty !== undefined ? faculty : existing?.faculty;
+    if (effectiveFaculty) tags.push(`faculty=${encodeURIComponent(effectiveFaculty)}`);
+    if (tags.length > 0) {
+      avatarUrl = avatarUrl ? `${avatarUrl}#${tags.join('&')}` : `#${tags.join('&')}`;
+    }
+
+    const patch: Record<string, any> = { role: dbRole, avatar_url: avatarUrl };
     if (departmentId !== undefined) patch['department_id'] = departmentId;
 
     const { data, error } = await this.db
@@ -1069,10 +1238,10 @@ export class SupabaseAuditRepository implements IAuditRepository {
   }
 
   async findAll(organizationId: string, filters?: { actorId?: string; resourceType?: string; limit?: number }): Promise<AuditLog[]> {
-    let q = this.db
-      .from('audit_logs')
-      .select('*')
-      .eq('organization_id', organizationId);
+    let q = this.db.from('audit_logs').select('*');
+    if (organizationId && organizationId !== 'ALL') {
+      q = q.eq('organization_id', organizationId);
+    }
 
     if (filters?.actorId)      q = q.eq('actor_id', filters.actorId);
     if (filters?.resourceType) q = q.eq('resource_type', filters.resourceType);
@@ -1123,11 +1292,26 @@ export class SupabaseOrganizationRepository implements IOrganizationRepository {
   private db = getSupabaseClient();
 
   private mapOrg(row: Record<string, any>): Organization {
+    let orgType: string | undefined = row.org_type;
+    if (!orgType && row.plan && typeof row.plan === 'string') {
+      const match = row.plan.replace(/^type:/, '').split(':')[0].toUpperCase();
+      if (['COMPANY', 'UNIVERSITY', 'SCHOOL', 'HOSPITAL', 'GOVERNMENT', 'NGO'].includes(match)) {
+        orgType = match;
+      }
+    }
+    if (!orgType || orgType === 'COMPANY') {
+      const inferred = inferOrgTypeFromName(row.name);
+      if (inferred !== 'COMPANY') {
+        orgType = inferred;
+      }
+    }
+
     return {
       id: row.id,
       name: row.name,
       slug: row.slug,
-      plan: row.plan || 'free',
+      plan: row.plan || 'enterprise',
+      orgType: orgType || 'COMPANY',
       createdAt: row.created_at
     };
   }
@@ -1161,18 +1345,29 @@ export class SupabaseOrganizationRepository implements IOrganizationRepository {
     return data.map(r => this.mapOrg(r));
   }
 
-  async create(data: { name: string; slug?: string }): Promise<Organization> {
+  async create(data: { name: string; slug?: string; orgType?: string }): Promise<Organization> {
     const baseSlug = data.slug || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    let orgType = data.orgType;
+    if (!orgType || orgType === 'COMPANY') {
+      const inferred = inferOrgTypeFromName(data.name);
+      if (inferred !== 'COMPANY') {
+        orgType = inferred;
+      }
+    }
+    orgType = orgType || 'COMPANY';
     const slug = `${baseSlug}-${Date.now().toString().slice(-4)}`;
-    const { data: created, error } = await this.db
-      .from('organizations')
-      .insert({
-        name: data.name,
-        slug,
-        plan: 'enterprise'
-      })
-      .select()
-      .single();
+    const plan = `type:${orgType}:enterprise`;
+    const row = { name: data.name, slug, plan, org_type: orgType };
+
+    let { data: created, error } = await this.db.from('organizations').insert(row).select().single();
+
+    // Fallback for databases where the org_type migration hasn't been applied yet
+    if (error && /org_type/i.test(error.message || '')) {
+      console.warn('  ⚠️  organizations.org_type column missing. Storing in plan column instead.');
+      const { org_type, ...legacyRow } = row;
+      ({ data: created, error } = await this.db.from('organizations').insert(legacyRow).select().single());
+    }
+
     if (error || !created) throw new Error(error?.message || 'Failed to create organization');
     return this.mapOrg(created);
   }

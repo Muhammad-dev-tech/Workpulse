@@ -1,6 +1,6 @@
 // WorkPulse Core Domain Types
 
-export type UserRole = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'MANAGER' | 'EMPLOYEE' | 'OPERATOR';
+export type UserRole = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'DEAN' | 'MANAGER' | 'EMPLOYEE' | 'OPERATOR';
 
 export type RequestPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 
@@ -23,6 +23,7 @@ export interface User {
   id: string;
   organizationId: string;
   departmentId?: string;
+  faculty?: string;
   email: string;
   passwordHash?: string;
   name: string;
@@ -36,10 +37,24 @@ export interface Organization {
   name: string;
   slug: string;
   plan: string;
+  /** COMPANY | UNIVERSITY | SCHOOL | HOSPITAL | GOVERNMENT | NGO */
+  orgType: string;
   createdAt: string;
 }
 
-export type ApprovalPolicy = 'DIRECT' | 'DEPT_MANAGER' | 'EXECUTIVE_ONLY' | 'MULTI_TIER_CHAIN';
+export type ApprovalPolicy = 'DIRECT' | 'DEPT_MANAGER' | 'DEAN' | 'EXECUTIVE_ONLY' | 'MULTI_TIER_CHAIN';
+
+export interface Faculty {
+  id: string;
+  organizationId: string;
+  name: string;
+  code?: string;
+  description?: string;
+  deanId?: string;
+  deanName?: string;
+  departmentCount?: number;
+  createdAt: string;
+}
 
 export interface DepartmentRequestType {
   id: string;
@@ -57,6 +72,9 @@ export interface Department {
   name: string;
   code: string;
   description: string;
+  faculty?: string;
+  approvalPolicy?: ApprovalPolicy;
+  requiresApproval?: boolean;
   managerId?: string;
   managerName?: string;
   responsibilities: string[];

@@ -17,7 +17,7 @@ export interface IOrganizationRepository {
   findById(id: string): Promise<Organization | null>;
   findBySlug(slug: string): Promise<Organization | null>;
   findAll(): Promise<Organization[]>;
-  create(data: { name: string; slug?: string }): Promise<Organization>;
+  create(data: { name: string; slug?: string; orgType?: string }): Promise<Organization>;
 }
 
 export interface IRequestRepository {
@@ -68,6 +68,7 @@ export interface IDepartmentRepository {
   create(organizationId: string, data: Omit<Department, 'id' | 'createdAt' | 'organizationId'>): Promise<Department>;
   update(organizationId: string, id: string, data: Partial<Department>): Promise<Department | null>;
   assignManager(organizationId: string, departmentId: string, managerId: string, managerName: string): Promise<Department | null>;
+  vacateManager(organizationId: string, departmentId: string): Promise<Department | null>;
 }
 
 export interface IUserRepository {
@@ -75,7 +76,7 @@ export interface IUserRepository {
   findById(id: string): Promise<User | null>;
   findAll(organizationId: string): Promise<User[]>;
   create(user: Omit<User, 'id' | 'createdAt'>): Promise<User>;
-  updateRoleAndDepartment(userId: string, role: User['role'], departmentId?: string): Promise<User | null>;
+  updateRoleAndDepartment(userId: string, role: User['role'], departmentId?: string, faculty?: string): Promise<User | null>;
 }
 
 export interface INotificationRepository {

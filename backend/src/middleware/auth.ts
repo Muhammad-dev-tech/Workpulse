@@ -30,6 +30,19 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'analytics:view',
     'audit:view'
   ],
+  DEAN: [
+    'department:view',
+    'department:manage',
+    'department:assign_manager',
+    'workflow:view',
+    'request:view_all',
+    'request:create',
+    'request:update',
+    'request:approve',
+    'task:manage',
+    'analytics:view',
+    'audit:view'
+  ],
   MANAGER: [
     'department:view',
     'workflow:view',
@@ -87,7 +100,13 @@ export const requireAuthentication = async (
     }
 
     req.user = user;
-    req.organizationId = user.organizationId;
+    // Platform Super Admin (admin@acme.com) can dynamically switch or view all organizations via X-Organization-Id
+    const headerOrgId = req.headers['x-organization-id'] as string;
+    if (user.role === 'SUPER_ADMIN' && headerOrgId) {
+      req.organizationId = headerOrgId;
+    } else {
+      req.organizationId = user.organizationId;
+    }
     next();
   } catch (err) {
     res.status(401).json({
@@ -131,7 +150,7 @@ export const requirePermission = (permission: string) => {
  * Verifies if user has authority to access data for a given department.
  */
 export const canUserAccessDepartment = (user: User, departmentId: string): boolean => {
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN') {
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN' || user.role === 'DEAN') {
     return true;
   }
   if (user.role === 'MANAGER') {
@@ -146,7 +165,7 @@ export const canUserAccessDepartment = (user: User, departmentId: string): boole
  * Implements: USER -> ROLE -> PERMISSIONS -> ORGANIZATION SCOPE -> DEPARTMENT SCOPE -> RESOURCE ACCESS
  */
 export const canUserAccessRequest = (user: User, request: RequestItem): boolean => {
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN') {
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN' || user.role === 'DEAN') {
     return true;
   }
   // If user is requester or assignee, always accessible
@@ -155,6 +174,10 @@ export const canUserAccessRequest = (user: User, request: RequestItem): boolean 
   }
   // Check if any task inside is assigned to this user
   if (request.tasks && request.tasks.some(t => t.assigneeId === user.id)) {
+    return true;
+  }
+  // Check if user is an approver on this request
+  if (request.approvals && request.approvals.some(a => a.approverId === user.id)) {
     return true;
   }
   // If Manager, accessible only if request belongs to their department

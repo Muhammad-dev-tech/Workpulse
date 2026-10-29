@@ -14,9 +14,18 @@ router.get('/', requireAuthentication, async (req: AuthenticatedRequest, res: Re
   if (status) filters.status = String(status);
   if (requestId) filters.requestId = String(requestId);
 
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN') {
-    if (departmentId) filters.departmentId = String(departmentId);
-    if (myOnly === 'true') filters.assigneeId = user.id;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN' || user.role === 'DEAN') {
+    // Executive and Dean tiers are governance and approval authorities, excluded from operational task queues.
+    // If inspecting subtasks of a specific request or department, allow viewing:
+    if (requestId) {
+      // Allow inspection of request subtasks
+    } else if (departmentId) {
+      filters.departmentId = String(departmentId);
+    } else {
+      // General task view returns empty for executives; operational work belongs to unit heads & staff
+      res.json({ success: true, data: [] });
+      return;
+    }
   } else if (user.role === 'MANAGER') {
     // Manager sees tasks in their assigned department or assigned to them
     if (departmentId && departmentId !== user.departmentId) {
@@ -74,6 +83,23 @@ router.post('/', requireAuthentication, async (req: AuthenticatedRequest, res: R
   if (!assignee) {
     res.status(404).json({ success: false, error: { code: 'ASSIGNEE_NOT_FOUND', message: 'Assignee not found.' } });
     return;
+  }
+
+  if (user.role === 'MANAGER') {
+    if (assignee.id === user.id) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_ASSIGNEE', message: 'You cannot assign a task to yourself. Select a staff member in your department.' }
+      });
+      return;
+    }
+    if (assignee.departmentId !== request.departmentId) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_ASSIGNEE', message: 'Tasks can only be assigned to staff within this department.' }
+      });
+      return;
+    }
   }
 
   const newTask = await taskRepository.create({

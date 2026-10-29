@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS organizations (
   name        TEXT NOT NULL,
   slug        TEXT NOT NULL UNIQUE,
   plan        TEXT NOT NULL DEFAULT 'free',
+  org_type    TEXT NOT NULL DEFAULT 'COMPANY',
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

@@ -1,8 +1,10 @@
 import dotenv from 'dotenv';
 import path from 'path';
-dotenv.config({ path: path.resolve(__dirname, '../../.env.local') });
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
-dotenv.config();
+import dns from 'dns';
+try { dns.setDefaultResultOrder('ipv4first'); } catch {}
+dotenv.config({ path: path.resolve(__dirname, '../../.env.local'), override: true });
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true });
+dotenv.config({ override: true });
 
 import express from 'express';
 import cors from 'cors';
@@ -14,9 +16,11 @@ import departmentRoutes from './routes/departmentRoutes';
 import workflowRoutes from './routes/workflowRoutes';
 import auditRoutes from './routes/auditRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import adminRoutes from './routes/adminRoutes';
+import memberRoutes from './routes/memberRoutes';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
 
 // Middleware
 app.use(cors({ origin: true, credentials: true }));
@@ -41,11 +45,24 @@ app.use('/api/departments', departmentRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/members', memberRoutes);
 
 import { startSlaDaemon, runSlaScan } from './services/slaDaemon';
+ 
+// Root service overview
+app.get('/', (req, res) => {
+  res.json({
+    platform: 'WorkPulse API Server',
+    status: 'online',
+    version: '1.0.0',
+    health: '/health',
+    timestamp: new Date().toISOString()
+  });
+});
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
+// Health check endpoint (Render zero-downtime & monitoring)
+app.get(['/health', '/api/health'], (req, res) => {
   res.json({
     status: 'healthy',
     platform: 'WorkPulse Core',
@@ -69,7 +86,7 @@ app.use('*', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
   console.log(`  🚀 WorkPulse Backend Server running on port ${PORT}`);
   console.log(`  🏢 Seed Organization: Acme Technologies (Active)`);

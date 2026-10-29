@@ -1,4 +1,4 @@
-export type UserRole = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'MANAGER' | 'EMPLOYEE' | 'OPERATOR';
+export type UserRole = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'DEAN' | 'MANAGER' | 'EMPLOYEE' | 'OPERATOR';
 
 export interface UserPersona {
   id: string;
@@ -6,7 +6,29 @@ export interface UserPersona {
   email: string;
   role: UserRole;
   departmentId?: string;
+  departmentName?: string;
+  departmentCode?: string;
+  faculty?: string;
   avatarUrl?: string;
+  organizationId?: string;
+  organizationName?: string;
+  organizationType?: string;
+  createdAt?: string;
+}
+
+export type ApprovalPolicy = 'DIRECT' | 'DEPT_MANAGER' | 'DEAN' | 'EXECUTIVE_ONLY' | 'MULTI_TIER_CHAIN';
+
+export interface Faculty {
+  id?: string;
+  organizationId: string;
+  name: string;
+  code?: string;
+  description?: string;
+  deanId?: string;
+  deanName?: string;
+  departmentCount?: number;
+  departments?: { id: string; name: string; code: string; approvalPolicy?: ApprovalPolicy; managerName?: string }[];
+  createdAt?: string;
 }
 
 export interface DepartmentRequestType {
@@ -15,7 +37,7 @@ export interface DepartmentRequestType {
   description?: string;
   defaultPriority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   defaultWorkflowId?: string;
-  approvalPolicy?: 'DIRECT' | 'DEPT_MANAGER' | 'EXECUTIVE_ONLY' | 'MULTI_TIER_CHAIN';
+  approvalPolicy?: ApprovalPolicy;
   requiresApproval?: boolean;
 }
 
@@ -24,6 +46,9 @@ export interface Department {
   name: string;
   code: string;
   description: string;
+  faculty?: string;
+  approvalPolicy?: ApprovalPolicy;
+  requiresApproval?: boolean;
   managerId?: string;
   managerName?: string;
   responsibilities: string[];
@@ -93,15 +118,18 @@ export interface TaskItem {
 export interface RequestItem {
   id: string;
   requestId: string;
+  customId?: string;
   organizationId: string;
   requesterId: string;
   requesterName?: string;
   departmentId: string;
   departmentName?: string;
+  faculty?: string;
   requestTypeId?: string;
   requestTypeName?: string;
   currentStepId?: string;
   currentStepName?: string;
+  stepId?: string;
   workflowTemplateId?: string;
   assigneeId?: string;
   assigneeName?: string;
@@ -109,7 +137,7 @@ export interface RequestItem {
   description: string;
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   status: 'DRAFT' | 'SUBMITTED' | 'ACTIVE' | 'WAITING' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
-  approvalPolicy?: 'DIRECT' | 'DEPT_MANAGER' | 'EXECUTIVE_ONLY' | 'MULTI_TIER_CHAIN';
+  approvalPolicy?: ApprovalPolicy;
   waitingOn?: string;
   waitingSince?: string;
   dueDate?: string;
@@ -193,5 +221,46 @@ export interface PulseAiMessage {
     tool: string;
     description: string;
     parameters: any;
+  };
+}
+
+export interface AdminOrganizationSummary {
+  id: string;
+  name: string;
+  slug: string;
+  orgType: string;
+  plan: string;
+  createdAt: string;
+  admin: {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+    avatarUrl?: string;
+    createdAt?: string;
+  } | null;
+  stats: {
+    usersCount: number;
+    departmentsCount: number;
+    requestsCount: number;
+    activeRequestsCount: number;
+    waitingRequestsCount: number;
+    completedRequestsCount: number;
+    tasksCount: number;
+  };
+}
+
+export interface AdminStats {
+  totalOrganizations: number;
+  totalUsers: number;
+  totalDepartments: number;
+  totalRequests: number;
+  totalActive: number;
+  totalWaiting: number;
+  totalCompleted: number;
+  platformSuperAdmin?: {
+    name: string;
+    email: string;
+    role: string;
   };
 }

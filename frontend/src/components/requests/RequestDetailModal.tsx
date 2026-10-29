@@ -1,28 +1,26 @@
 import React, { useState } from 'react';
 import { RequestItem, UserPersona, Department } from '../../types';
 import { api } from '../../services/api';
+import { getTerminology } from '../../terminology';
 import { AssignTaskModal } from '../tasks/AssignTaskModal';
 import {
   X,
   Clock,
   User,
-  Building,
+  Building2,
   CheckCircle,
-  XCircle,
   MessageSquare,
   History,
   Hourglass,
   Send,
-  GitCommit,
   Check,
-  AlertCircle,
   CheckSquare,
   Plus,
-  Play,
   Paperclip,
   Download,
   FileText,
-  Upload
+  Upload,
+  ShieldCheck
 } from 'lucide-react';
 
 interface RequestDetailModalProps {
@@ -42,6 +40,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
   onClose,
   onRefresh
 }) => {
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');
@@ -74,24 +73,6 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
     } finally {
       setIsUploadingFile(false);
       if (e.target) e.target.value = '';
-    }
-  };
-
-  const handleAttachPresetDoc = async (docName: string, docType: string) => {
-    if (!request) return;
-    try {
-      setIsUploadingFile(true);
-      await api.addAttachment(request.id, {
-        fileName: docName,
-        fileSize: Math.floor(Math.random() * 250000) + 50000,
-        fileType: docType,
-        fileUrl: '#'
-      });
-      onRefresh();
-    } catch (err: any) {
-      alert(err.message || 'Failed to attach document');
-    } finally {
-      setIsUploadingFile(false);
     }
   };
 
@@ -141,89 +122,179 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
 
   const isManagerOfDept = currentUser?.role === 'MANAGER' && currentUser?.departmentId === request.departmentId;
   const isAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ORG_ADMIN';
+  const isDean = currentUser?.role === 'DEAN';
   const canManage = isManagerOfDept || isAdmin;
-  const canApprove = currentUser && (currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'ORG_ADMIN' || (currentUser.role === 'MANAGER' && currentUser.departmentId === request.departmentId));
+
+  const canApproveItem = (approval: any) => {
+    if (!currentUser) return false;
+    if (isAdmin) return true;
+    if (approval.approverId === currentUser.id) return true;
+    const step = (approval.stepId || approval.id || '').toLowerCase();
+    if (step.includes('tier-1') || step.includes('dept-manager') || step.includes('manager')) {
+      return currentUser.role === 'MANAGER' && (!currentUser.departmentId || currentUser.departmentId === request.departmentId);
+    }
+    if (step.includes('tier-2') || step.includes('dean')) {
+      return currentUser.role === 'DEAN' || currentUser.role === 'ORG_ADMIN' || currentUser.role === 'SUPER_ADMIN';
+    }
+    if (step.includes('tier-3') || step.includes('super-admin') || step.includes('exec')) {
+      return isAdmin;
+    }
+    return isManagerOfDept || isDean || isAdmin;
+  };
+
+  const pendingApprovalForUser = request.approvals?.find(a => a.status === 'PENDING' && canApproveItem(a));
+  const activePendingApproval = request.approvals?.find(a => a.status === 'PENDING');
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
-        <div className="glass-dropdown relative flex flex-col h-[90vh] w-full max-w-4xl rounded-3xl border border-slate-800 shadow-2xl overflow-hidden">
-          {/* Modal Header */}
-          <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4 bg-slate-900/60">
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-sm font-bold text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
+        <div className="relative flex flex-col h-[90vh] w-full max-w-4xl rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xl overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-5 py-3.5 bg-slate-50 dark:bg-slate-900/60 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 shrink-0">
                 {request.requestId}
               </span>
-              <div>
-                <h2 className="text-base font-bold text-white line-clamp-1">{request.title}</h2>
-                <span className="text-xs text-slate-400">Created {new Date(request.createdAt).toLocaleDateString()} by {request.requesterName}</span>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">{request.title}</h2>
+                <span className="text-[11px] text-slate-500 truncate block">
+                  Created {new Date(request.createdAt).toLocaleDateString()} by {request.requesterName}
+                </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {canManage && request.status !== 'COMPLETED' && (
+            <div className="flex items-center gap-2 shrink-0 ml-3">
+              {pendingApprovalForUser && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleDecision(pendingApprovalForUser.id, 'APPROVED')}
+                    disabled={isDeciding}
+                    className="flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700 transition disabled:opacity-50"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    <span>{isDeciding ? 'Saving...' : 'Approve'}</span>
+                  </button>
+                  <button
+                    onClick={() => handleDecision(pendingApprovalForUser.id, 'REJECTED')}
+                    disabled={isDeciding}
+                    className="flex items-center gap-1 rounded-md bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-700 transition disabled:opacity-50"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    <span>Reject</span>
+                  </button>
+                </div>
+              )}
+
+              {canManage && request.status !== 'COMPLETED' && request.status !== 'PENDING_APPROVAL' && (
                 <button
                   onClick={handleCompleteRequest}
                   disabled={isCompleting}
-                  className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-600/30 hover:bg-emerald-500 transition disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700 transition disabled:opacity-50"
                 >
                   <CheckCircle className="h-3.5 w-3.5" />
-                  <span>{isCompleting ? 'Completing...' : 'Verify & Close Request'}</span>
+                  <span>{isCompleting ? 'Closing...' : 'Close Request'}</span>
                 </button>
               )}
 
               <button
                 onClick={onClose}
-                className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+                className="rounded-md p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                aria-label="Close modal"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
           </div>
 
-          {/* Modal Body with 2-Column Layout */}
-          <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left / Main Section */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* Description */}
-              <div className="glass-panel rounded-2xl p-4 border border-slate-800">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Requisition Description</h4>
-                <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{request.description}</p>
-              </div>
-
-              {/* Waiting On Bottleneck Notice (if applicable) */}
-              {request.waitingOn && (
-                <div className="rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-500/10 to-transparent p-4 space-y-2">
+          {/* Modal Body: 2 Columns */}
+          <div className="flex-1 overflow-y-auto p-5 grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* Left Main Section (2 cols) */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Approval Notice */}
+              {request.status === 'PENDING_APPROVAL' && (
+                <div className="rounded-lg border border-purple-200 dark:border-purple-900/50 bg-purple-50 dark:bg-purple-950/20 p-3.5 space-y-2">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-wider">
-                      <Hourglass className="h-4 w-4" />
-                      <span>Current Blocker: Waiting On</span>
-                    </div>
-                    <span className="text-[11px] text-slate-400">
-                      Since {request.waitingSince ? new Date(request.waitingSince).toLocaleDateString() : 'recent'}
+                    <span className="text-xs font-semibold text-purple-800 dark:text-purple-300 flex items-center gap-1.5">
+                      <ShieldCheck className="h-4 w-4" />
+                      <span>Approval Required: {request.currentStepName || 'Pending'}</span>
                     </span>
                   </div>
-                  <div className="text-base font-extrabold text-amber-200">
-                    {request.waitingOn}
-                  </div>
-                  <p className="text-xs text-slate-300">
-                    Work on {request.requestId} is suspended until the required dependency or quotation is provided.
-                  </p>
+
+                  {pendingApprovalForUser ? (
+                    <div className="space-y-2 pt-1">
+                      <p className="text-xs text-purple-900 dark:text-purple-200">
+                        Your authorization as {currentUser?.role ? (terms.roles[currentUser.role] || currentUser.role) : 'Authorized Official'} is required to proceed.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={approvalNotes}
+                          onChange={(e) => setApprovalNotes(e.target.value)}
+                          placeholder="Optional notes or remarks..."
+                          className="flex-1 rounded-md border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-950 px-2.5 py-1 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-purple-500"
+                        />
+                        <button
+                          onClick={() => handleDecision(pendingApprovalForUser.id, 'APPROVED')}
+                          disabled={isDeciding}
+                          className="rounded-md bg-emerald-600 hover:bg-emerald-700 px-3 py-1 text-xs font-semibold text-white transition disabled:opacity-50"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleDecision(pendingApprovalForUser.id, 'REJECTED')}
+                          disabled={isDeciding}
+                          className="rounded-md bg-rose-600 hover:bg-rose-700 px-3 py-1 text-xs font-semibold text-white transition disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ) : activePendingApproval ? (
+                    <p className="text-xs text-purple-900 dark:text-purple-200">
+                      Awaiting sign-off by <strong>{activePendingApproval.approverName}</strong>.
+                    </p>
+                  ) : null}
                 </div>
               )}
 
-              {/* Operational Tasks Section (Section 9, 15, 33) */}
-              <div className="glass-panel rounded-2xl p-4 border border-slate-800 space-y-3">
+              {/* Description */}
+              <div className="rounded-lg p-3.5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Description</span>
+                <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
+                  {request.description}
+                </p>
+              </div>
+
+              {/* Blocker Alert */}
+              {request.waitingOn && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 p-3.5 space-y-1">
+                  <div className="flex items-center justify-between text-xs font-semibold text-amber-800 dark:text-amber-300">
+                    <span className="flex items-center gap-1.5">
+                      <Hourglass className="h-3.5 w-3.5" />
+                      <span>Current Blocker</span>
+                    </span>
+                    <span className="text-[11px] font-normal text-slate-500">
+                      Since {request.waitingSince ? new Date(request.waitingSince).toLocaleDateString() : 'recent'}
+                    </span>
+                  </div>
+                  <div className="text-xs font-bold text-amber-950 dark:text-amber-100">
+                    Waiting on: {request.waitingOn}
+                  </div>
+                </div>
+              )}
+
+              {/* Operational Tasks Section */}
+              <div className="rounded-lg p-3.5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                    <CheckSquare className="h-4 w-4 text-indigo-400" />
-                    <span>Operational Resolution Tasks ({(request.tasks || []).length})</span>
-                  </h4>
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <CheckSquare className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>Tasks ({(request.tasks || []).length})</span>
+                  </span>
 
                   {canManage && request.status !== 'COMPLETED' && (
                     <button
                       onClick={() => setAssignTaskOpen(true)}
-                      className="flex items-center gap-1 rounded-lg bg-indigo-600/30 border border-indigo-500/40 px-2.5 py-1 text-xs font-semibold text-indigo-300 hover:bg-indigo-600/50 transition"
+                      className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition"
                     >
                       <Plus className="h-3 w-3" />
                       <span>Assign Task</span>
@@ -232,44 +303,35 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                 </div>
 
                 {(!request.tasks || request.tasks.length === 0) ? (
-                  <div className="rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">
-                    No individual tasks dispatched yet.
-                    {canManage && (
-                      <span className="block mt-1 text-indigo-400">
-                        Click "Assign Task" above to assign diagnostic or installation steps to a technician.
-                      </span>
-                    )}
-                  </div>
+                  <p className="text-xs text-slate-400 py-2">No individual tasks assigned.</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {request.tasks.map((task) => (
                       <div
                         key={task.id}
-                        className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 space-y-2"
+                        className="rounded-md border border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-2.5 space-y-1 text-xs"
                       >
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-bold text-indigo-400">{task.taskId}</span>
-                            <span className="text-xs font-semibold text-white">{task.title}</span>
+                          <div className="flex items-center gap-1.5 font-medium">
+                            <span className="font-mono text-[11px] text-slate-500">{task.taskId}</span>
+                            <span className="text-slate-900 dark:text-white">{task.title}</span>
                           </div>
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                            task.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-                            task.status === 'IN_PROGRESS' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30 animate-pulse' :
-                            'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${
+                            task.status === 'COMPLETED'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                              : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
                           }`}>
                             {task.status.replace('_', ' ')}
                           </span>
                         </div>
-
-                        <div className="flex items-center justify-between text-[11px] text-slate-400">
-                          <span>Assignee: <strong className="text-slate-200">{task.assigneeName}</strong></span>
-                          <span>Type: <strong className="text-slate-200">{task.taskType}</strong></span>
+                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                          <span>Assignee: {task.assigneeName}</span>
+                          <span>{task.taskType}</span>
                         </div>
-
                         {task.resultNotes && (
-                          <div className="rounded-lg bg-slate-900 p-2 text-[11px] text-emerald-300 border border-slate-800">
-                            <strong>Resolution:</strong> {task.resultNotes}
-                          </div>
+                          <p className="text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 p-1.5 rounded">
+                            {task.resultNotes}
+                          </p>
                         )}
                       </div>
                     ))}
@@ -277,74 +339,23 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                 )}
               </div>
 
-              {/* Approvals Section */}
-              {request.approvals && request.approvals.length > 0 && (
-                <div className="glass-panel rounded-2xl p-4 border border-slate-800 space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-purple-400" />
-                    <span>Required Governance & Approvals</span>
-                  </h4>
+              {/* Timeline */}
+              <div className="rounded-lg p-3.5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-3">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Timeline</span>
+                </span>
 
-                  <div className="space-y-3">
-                    {request.approvals.map((app) => (
-                      <div key={app.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-white">{app.approverName}</span>
-                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${
-                              app.status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-                              app.status === 'REJECTED' ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
-                              'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                            }`}>
-                              {app.status}
-                            </span>
-                          </div>
-                          {app.notes && <p className="text-xs text-slate-400 mt-1">Note: {app.notes}</p>}
-                        </div>
-
-                        {app.status === 'PENDING' && canApprove && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              disabled={isDeciding}
-                              onClick={() => handleDecision(app.id, 'APPROVED')}
-                              className="flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition active:scale-95"
-                            >
-                              <Check className="h-3.5 w-3.5" />
-                              <span>Approve</span>
-                            </button>
-                            <button
-                              disabled={isDeciding}
-                              onClick={() => handleDecision(app.id, 'REJECTED')}
-                              className="flex items-center gap-1 rounded-lg bg-rose-600/80 hover:bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition active:scale-95"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                              <span>Reject</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Audit Timeline */}
-              <div className="glass-panel rounded-2xl p-4 border border-slate-800 space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                  <History className="h-4 w-4 text-cyan-400" />
-                  <span>Operational Timeline & Audit Trail</span>
-                </h4>
-
-                <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-800">
+                <div className="relative pl-5 space-y-3 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-px before:bg-slate-200 dark:before:bg-slate-800">
                   {request.timeline.map((event) => (
-                    <div key={event.id} className="relative flex items-start gap-3">
-                      <span className="absolute -left-6 top-1 h-3 w-3 rounded-full border-2 border-[#0b0f19] bg-indigo-500"></span>
+                    <div key={event.id} className="relative flex items-start gap-2.5 text-xs">
+                      <span className="absolute -left-5 top-1 h-2 w-2 rounded-full bg-emerald-600"></span>
                       <div className="flex-1">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white">{event.title}</span>
-                          <span className="text-[10px] text-slate-500">{new Date(event.timestamp).toLocaleString()}</span>
+                          <span className="font-semibold text-slate-900 dark:text-white text-[11px]">{event.title}</span>
+                          <span className="text-[10px] text-slate-400">{new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
-                        {event.details && <p className="text-xs text-slate-400 mt-0.5">{event.details}</p>}
+                        {event.details && <p className="text-slate-600 dark:text-slate-400 text-[11px] mt-0.5">{event.details}</p>}
                       </div>
                     </div>
                   ))}
@@ -352,54 +363,50 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Right Section */}
-            <div className="space-y-6">
-              {/* Metadata Card */}
-              <div className="glass-panel rounded-2xl p-4 border border-slate-800 space-y-3 text-xs">
-                <h4 className="font-bold uppercase tracking-wider text-slate-400">Request Attributes</h4>
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between py-1 border-b border-slate-800/60">
-                    <span className="text-slate-400">Department</span>
-                    <span className="font-semibold text-white">{request.departmentName}</span>
+            {/* Right Column (1 col) */}
+            <div className="space-y-4">
+              {/* Attributes Card */}
+              <div className="rounded-lg p-3.5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-2 text-xs">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Attributes</span>
+
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex justify-between py-0.5 border-b border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-500">Department</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{request.departmentName}</span>
                   </div>
-                  <div className="flex justify-between py-1 border-b border-slate-800/60">
-                    <span className="text-slate-400">Request Type</span>
-                    <span className="font-semibold text-purple-300">{request.requestTypeName || 'General'}</span>
+                  <div className="flex justify-between py-0.5 border-b border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-500">Type</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{request.requestTypeName || 'General'}</span>
                   </div>
-                  <div className="flex justify-between py-1 border-b border-slate-800/60">
-                    <span className="text-slate-400">Status</span>
-                    <span className="font-semibold text-cyan-300">{request.status}</span>
+                  <div className="flex justify-between py-0.5 border-b border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-500">Status</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{request.status}</span>
                   </div>
-                  <div className="flex justify-between py-1 border-b border-slate-800/60">
-                    <span className="text-slate-400">Priority</span>
-                    <span className="font-semibold text-white">{request.priority}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-slate-800/60">
-                    <span className="text-slate-400">Current Stage</span>
-                    <span className="font-semibold text-indigo-300">{request.currentStepName || 'Active Queue'}</span>
+                  <div className="flex justify-between py-0.5 border-b border-slate-100 dark:border-slate-800">
+                    <span className="text-slate-500">Priority</span>
+                    <span className="font-medium text-slate-900 dark:text-white">{request.priority}</span>
                   </div>
                   {request.dueDate && (
-                    <div className="flex justify-between py-1">
-                      <span className="text-slate-400">Target Due Date</span>
-                      <span className="font-semibold text-white">{new Date(request.dueDate).toLocaleDateString()}</span>
+                    <div className="flex justify-between py-0.5">
+                      <span className="text-slate-500">Due Date</span>
+                      <span className="font-medium text-slate-900 dark:text-white">{new Date(request.dueDate).toLocaleDateString()}</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Attachments & Documentation Section */}
-              <div className="glass-panel rounded-2xl p-4 border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Paperclip className="h-4 w-4 text-indigo-400" />
-                    <span>Documentation & Proofs ({(request.attachments || []).length})</span>
-                  </h4>
+              {/* Attachments Section */}
+              <div className="rounded-lg p-3.5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Paperclip className="h-3.5 w-3.5" />
+                    <span>Documents ({(request.attachments || []).length})</span>
+                  </span>
 
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isUploadingFile}
-                    className="flex items-center gap-1 text-[11px] font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-lg transition"
+                    className="flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
                   >
                     <Upload className="h-3 w-3" />
                     <span>Upload</span>
@@ -414,106 +421,71 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                 </div>
 
                 {(!request.attachments || request.attachments.length === 0) ? (
-                  <div className="rounded-xl border border-dashed border-slate-800 p-3 text-center space-y-2">
-                    <span className="text-xs text-slate-500 block">No verification files or proofs attached.</span>
-                    <div className="flex flex-wrap justify-center gap-1.5 pt-1">
-                      <button
-                        onClick={() => handleAttachPresetDoc('Level_300_Exam_Slip.pdf', 'application/pdf')}
-                        className="text-[10px] bg-slate-900 border border-slate-700/80 hover:border-indigo-500/50 text-slate-300 hover:text-white px-2 py-1 rounded-lg transition"
-                      >
-                        + Attach Exam Slip Proof
-                      </button>
-                      <button
-                        onClick={() => handleAttachPresetDoc('VC_Approval_Letter.pdf', 'application/pdf')}
-                        className="text-[10px] bg-slate-900 border border-slate-700/80 hover:border-indigo-500/50 text-slate-300 hover:text-white px-2 py-1 rounded-lg transition"
-                      >
-                        + Attach VC Approval Letter
-                      </button>
-                    </div>
-                  </div>
+                  <p className="text-xs text-slate-400">No documents attached.</p>
                 ) : (
-                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
                     {request.attachments.map((att) => (
                       <div
                         key={att.id}
-                        className="rounded-xl border border-slate-800 bg-slate-900/60 p-2.5 flex items-center justify-between text-xs hover:border-slate-700 transition"
+                        className="flex items-center justify-between rounded border border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2 text-xs"
                       >
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          <FileText className="h-4 w-4 text-indigo-400 shrink-0" />
-                          <div className="truncate">
-                            <span className="font-semibold text-white truncate block text-[11px]">{att.fileName}</span>
-                            <span className="text-[10px] text-slate-400">
-                              {Math.round(att.fileSize / 1024)} KB · by {att.uploadedByName}
-                            </span>
-                          </div>
+                        <div className="flex items-center gap-1.5 truncate">
+                          <FileText className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate text-[11px] font-medium text-slate-900 dark:text-slate-200">{att.fileName}</span>
                         </div>
-
-                        {att.fileUrl && att.fileUrl !== '#' ? (
+                        {att.fileUrl && att.fileUrl !== '#' && (
                           <a
                             href={att.fileUrl}
                             download={att.fileName}
-                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white shrink-0 ml-2"
-                            title="Download / View"
+                            className="text-slate-400 hover:text-slate-700 dark:hover:text-white ml-2 shrink-0"
+                            title="Download"
                           >
                             <Download className="h-3.5 w-3.5" />
                           </a>
-                        ) : (
-                          <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 shrink-0">
-                            Verified
-                          </span>
                         )}
                       </div>
                     ))}
-
-                    <div className="pt-1 flex justify-end">
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="text-[10px] text-indigo-400 hover:underline flex items-center gap-1"
-                      >
-                        + Add another document
-                      </button>
-                    </div>
                   </div>
                 )}
               </div>
 
               {/* Comments Feed */}
-              <div className="glass-panel rounded-2xl p-4 border border-slate-800 flex flex-col h-80">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 mb-3">
-                  <MessageSquare className="h-4 w-4 text-slate-400" />
-                  <span>Internal Comments ({request.comments.length})</span>
-                </h4>
+              <div className="rounded-lg p-3.5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs flex flex-col h-72">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-2">
+                  <MessageSquare className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Comments ({request.comments.length})</span>
+                </span>
 
-                <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
+                <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
                   {request.comments.length === 0 ? (
-                    <span className="text-slate-500 italic text-center block pt-8">No comments yet.</span>
+                    <p className="text-slate-400 text-center pt-8">No comments yet</p>
                   ) : (
                     request.comments.map((c) => (
-                      <div key={c.id} className="rounded-xl border border-slate-800/80 bg-slate-900/60 p-2.5 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-white text-[11px]">{c.authorName}</span>
-                          <span className="text-[10px] text-slate-500">{new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <div key={c.id} className="rounded border border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2 space-y-0.5">
+                        <div className="flex items-center justify-between text-[10px] text-slate-500">
+                          <strong className="text-slate-900 dark:text-slate-200 font-semibold">{c.authorName}</strong>
+                          <span>{new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
-                        <p className="text-slate-300 leading-normal">{c.content}</p>
+                        <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-normal">{c.content}</p>
                       </div>
                     ))
                   )}
                 </div>
 
-                <form onSubmit={handleAddComment} className="mt-3 flex items-center gap-2 pt-2 border-t border-slate-800">
+                <form onSubmit={handleAddComment} className="mt-2 flex items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <input
                     type="text"
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Add operational update or note..."
-                    className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                    placeholder="Add an internal note..."
+                    className="flex-1 rounded-md border border-slate-250 dark:border-slate-800 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-600"
                   />
                   <button
                     type="submit"
                     disabled={submittingComment || !commentText.trim()}
-                    className="rounded-xl bg-indigo-600 p-2 text-white hover:bg-indigo-500 disabled:opacity-50 transition"
+                    className="rounded-md bg-emerald-600 hover:bg-emerald-700 p-1.5 text-white disabled:opacity-50 transition"
                   >
-                    <Send className="h-4 w-4" />
+                    <Send className="h-3.5 w-3.5" />
                   </button>
                 </form>
               </div>
@@ -527,6 +499,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
           request={request}
           department={currentDept}
           personas={personas}
+          currentUser={currentUser}
           onClose={() => setAssignTaskOpen(false)}
           onAssigned={onRefresh}
         />

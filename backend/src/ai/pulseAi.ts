@@ -5,7 +5,8 @@ import {
   departmentRepository,
   userRepository,
   taskRepository,
-  auditRepository
+  auditRepository,
+  organizationRepository
 } from '../repositories';
 import { canUserAccessDepartment, canUserAccessRequest } from '../middleware/auth';
 
@@ -121,6 +122,15 @@ const toolDeclarations: FunctionDeclaration[] = [
         }
       },
       required: ['requestId', 'assigneeEmail']
+    }
+  },
+  {
+    name: 'get_platform_organizations',
+    description: 'Retrieve all registered organizations across the platform, their designated superadmins, and platform metrics. Only accessible to the Platform Super Admin.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+      required: []
     }
   }
 ];
@@ -261,10 +271,43 @@ export class PulseAiService {
       };
     }
 
+    // ─── get_platform_organizations ───────────────────────────
+    if (toolName === 'get_platform_organizations') {
+      if (user.role !== 'SUPER_ADMIN') {
+        return {
+          result: null,
+          error: 'PERMISSION_DENIED: Access Denied. Only the overall Platform Super Admin can query all organizations.'
+        };
+      }
+      const orgs = await organizationRepository.findAll();
+      const orgSummaries = await Promise.all(
+        orgs.map(async (o) => {
+          const orgUsers = await userRepository.findAll(o.id);
+          const admin = orgUsers.find(u => u.role === 'SUPER_ADMIN' || u.role === 'ORG_ADMIN') || orgUsers[0];
+          const [depts, reqs] = await Promise.all([
+            departmentRepository.findAll(o.id),
+            requestRepository.findAll(o.id)
+          ]);
+          return {
+            id: o.id,
+            name: o.name,
+            orgType: (o as any).orgType || 'COMPANY',
+            createdAt: o.createdAt,
+            superAdmin: admin ? { name: admin.name, email: admin.email, role: admin.role } : null,
+            departmentsCount: depts.length,
+            usersCount: orgUsers.length,
+            requestsCount: reqs.length
+          };
+        })
+      );
+      await auditRepository.logAiAction(organizationId, user.id, toolName, {}, true, 'Retrieved platform organizations overview');
+      return { result: orgSummaries };
+    }
+
     // ─── get_organization_overview ────────────────────────────
     if (toolName === 'get_organization_overview') {
-      if (user.role !== 'SUPER_ADMIN' && user.role !== 'ORG_ADMIN') {
-        return { result: null, error: 'PERMISSION_DENIED: Organization-wide overview requires administrator privileges.' };
+      if (user.role !== 'SUPER_ADMIN' && user.role !== 'ORG_ADMIN' && user.role !== 'DEAN') {
+        return { result: null, error: 'PERMISSION_DENIED: Organization-wide overview requires administrator or division governance privileges.' };
       }
       const [allRequests, allDepts, allTasks] = await Promise.all([
         requestRepository.findAll(organizationId),
@@ -385,7 +428,12 @@ export class PulseAiService {
 
     // ── Gemini path ────────────────────────────────────────────
     if (this.useGemini && this.genai) {
-      response = await this.processWithGemini(user, organizationId, query, conversationHistory);
+      try {
+        response = await this.processWithGemini(user, organizationId, query, conversationHistory);
+      } catch (err: any) {
+        console.error('  ⚠️ Pulse AI: Gemini call encountered error, falling back to rule engine:', err?.message || err);
+        response = await this.processWithKeywords(user, organizationId, query);
+      }
     } else {
       // ── Keyword fallback path ─────────────────────────────────
       response = await this.processWithKeywords(user, organizationId, query);
@@ -474,7 +522,7 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
       iterations++;
 
       const response = await models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3.8-flash',
         contents: loopContents,
         config: {
           systemInstruction,
@@ -526,7 +574,7 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
         }
 
         functionResults.push({
-          role: 'tool' as const,
+          role: 'user' as const,
           parts: [{
             functionResponse: {
               name: toolName,
@@ -714,6 +762,22 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
               `Responsibilities: ${handles}\n` +
               `Request Types Handled: ${reqTypes}`;
           }).join('\n\n'),
+          toolResults
+        };
+      }
+    }
+
+    // 5.5 Platform Organizations for Super Admin
+    if ((q.includes('organizations') || q.includes('all orgs') || q.includes('superadmin') || q.includes('platform org')) && user.role === 'SUPER_ADMIN') {
+      const { result, error } = await this.executeTool('get_platform_organizations', {}, user, organizationId);
+      toolResults.push({ tool: 'get_platform_organizations', parameters: {}, result: result || undefined, error: error || undefined });
+      if (!error && result) {
+        const orgList = result.map((o: any, idx: number) => {
+          const lead = o.superAdmin ? `${o.superAdmin.name} (${o.superAdmin.email})` : 'Unassigned';
+          return `${idx + 1}. **${o.name}** [${o.orgType}]\n   - Superadmin: ${lead}\n   - Stats: ${o.departmentsCount} departments, ${o.usersCount} users, ${o.requestsCount} requests`;
+        }).join('\n\n');
+        return {
+          answer: `Here is the global platform directory of all registered organizations:\n\n${orgList}`,
           toolResults
         };
       }

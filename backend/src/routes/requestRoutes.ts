@@ -1,13 +1,19 @@
 import { Router, Response } from 'express';
-import { requestRepository, departmentRepository, userRepository, auditRepository, notificationRepository, taskRepository } from '../repositories';
+import { requestRepository, departmentRepository, userRepository, auditRepository, notificationRepository, taskRepository, organizationRepository } from '../repositories';
 import {
   requireAuthentication,
   AuthenticatedRequest,
   canUserAccessRequest,
   canUserAccessDepartment
 } from '../middleware/auth';
+import { getTerminology, OrgTerminology } from '../config/terminology';
 
 const router = Router();
+
+const loadTerms = async (orgId: string): Promise<OrgTerminology> => {
+  const org = await organizationRepository.findById(orgId);
+  return getTerminology(org?.orgType, org?.name);
+};
 
 // Pending Radar: Scoped Operational Statistics
 router.get('/radar', requireAuthentication, async (req: AuthenticatedRequest, res: Response) => {
@@ -19,11 +25,18 @@ router.get('/radar', requireAuthentication, async (req: AuthenticatedRequest, re
   let visibleRequests = allRequests;
   if (user.role === 'MANAGER') {
     visibleRequests = allRequests.filter(
-      r => r.departmentId === user.departmentId || r.requesterId === user.id || r.assigneeId === user.id
+      r => r.departmentId === user.departmentId ||
+           r.requesterId === user.id ||
+           r.assigneeId === user.id ||
+           (r.approvals && r.approvals.some(a => a.approverId === user.id)) ||
+           (r.tasks && r.tasks.some(t => t.assigneeId === user.id))
     );
   } else if (user.role === 'EMPLOYEE' || user.role === 'OPERATOR') {
     visibleRequests = allRequests.filter(
-      r => r.requesterId === user.id || r.assigneeId === user.id || (r.tasks && r.tasks.some(t => t.assigneeId === user.id))
+      r => r.requesterId === user.id ||
+           r.assigneeId === user.id ||
+           (r.approvals && r.approvals.some(a => a.approverId === user.id)) ||
+           (r.tasks && r.tasks.some(t => t.assigneeId === user.id))
     );
   }
 
@@ -102,9 +115,6 @@ router.get('/', requireAuthentication, async (req: AuthenticatedRequest, res: Re
 
   if (myOnly === 'true' || user.role === 'EMPLOYEE') {
     filterOpts.requesterId = user.id;
-  } else if (user.role === 'MANAGER' && !departmentId) {
-    // By default, department manager sees their department
-    filterOpts.departmentId = user.departmentId;
   }
 
   const rawRequests = await requestRepository.findAll(orgId, filterOpts);
@@ -168,26 +178,60 @@ router.post('/', requireAuthentication, async (req: AuthenticatedRequest, res: R
       return;
     }
 
-    const reqType = dept.requestTypes.find(rt => rt.id === requestTypeId);
-    const isGovernanceKeyword = reqType?.name?.toLowerCase().includes('approval') ||
-      reqType?.name?.toLowerCase().includes('access') ||
-      reqType?.name?.toLowerCase().includes('rectif') ||
-      reqType?.name?.toLowerCase().includes('portal') ||
-      title?.toLowerCase().includes('rectif') ||
-      title?.toLowerCase().includes('portal') ||
-      title?.toLowerCase().includes('approval');
+    const reqType = (requestTypeId ? dept.requestTypes.find(rt => rt.id === requestTypeId || rt.name.toLowerCase() === requestTypeId.toLowerCase()) : undefined) || dept.requestTypes[0];
 
-    const policy = approvalPolicy || reqType?.approvalPolicy || (reqType?.requiresApproval || isGovernanceKeyword ? 'EXECUTIVE_ONLY' : 'DIRECT');
+    const terms = await loadTerms(orgId);
+    const execTitle = terms.roles.SUPER_ADMIN;
+    const orgAdminTitle = terms.roles.ORG_ADMIN;
+    const deanTitle = terms.roles.DEAN;
+    const mgrTitle = terms.roles.MANAGER;
+    const requesterRoleTitle = terms.roles[user.role] || user.role;
+
+    // RULE: Executive roles (Platform Super Admin, Org Super Admin / VC / CEO, and Dean)
+    // bypass all department pre-approval bottlenecks and route DIRECTLY to the destination department/faculty.
+    const isExemptExecutive = user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN' || user.role === 'DEAN';
+
+    // Department policy
+    const deptPolicy = dept.approvalPolicy || (dept.requiresApproval ? 'DEPT_MANAGER' : 'DIRECT');
+    let policy: 'DIRECT' | 'DEPT_MANAGER' | 'DEAN' | 'EXECUTIVE_ONLY' | 'MULTI_TIER_CHAIN';
+
+    if (isExemptExecutive) {
+      // Executive request goes direct even if the department normally requires pre-approval
+      policy = 'DIRECT';
+    } else if (approvalPolicy && ['DIRECT', 'DEPT_MANAGER', 'DEAN', 'EXECUTIVE_ONLY', 'MULTI_TIER_CHAIN'].includes(approvalPolicy)) {
+      policy = approvalPolicy as any;
+    } else if (deptPolicy && ['DIRECT', 'DEPT_MANAGER', 'DEAN', 'EXECUTIVE_ONLY', 'MULTI_TIER_CHAIN'].includes(deptPolicy as any)) {
+      policy = deptPolicy as any;
+    } else if (reqType?.approvalPolicy && ['DIRECT', 'DEPT_MANAGER', 'DEAN', 'EXECUTIVE_ONLY', 'MULTI_TIER_CHAIN'].includes(reqType.approvalPolicy)) {
+      policy = reqType.approvalPolicy as any;
+    } else if (dept.requiresApproval) {
+      policy = 'DEPT_MANAGER';
+    } else {
+      policy = 'DIRECT';
+    }
+
+    const allOrgUsers = await userRepository.findAll(orgId);
+    const targetDeptManager =
+      (dept.managerId ? allOrgUsers.find(u => u.id === dept.managerId) : undefined) ||
+      allOrgUsers.find(u => u.role === 'MANAGER' && u.departmentId === dept.id);
 
     let initialStatus: 'SUBMITTED' | 'ACTIVE' | 'PENDING_APPROVAL' = 'ACTIVE';
-    let initialStepName = 'Dispatched to Department Queue';
+    let initialStepName = isExemptExecutive
+      ? `Executive Direct Dispatch to ${dept.name}`
+      : `Dispatched to ${dept.name} queue`;
 
-    if (policy === 'EXECUTIVE_ONLY' || policy === 'MULTI_TIER_CHAIN') {
+    if (policy === 'MULTI_TIER_CHAIN') {
       initialStatus = 'PENDING_APPROVAL';
-      initialStepName = 'Awaiting Executive (Super Admin / VC / Director) Approval';
+      initialStepName = `Awaiting ${mgrTitle} approval (step 1 of 3)`;
+    } else if (policy === 'EXECUTIVE_ONLY') {
+      initialStatus = 'PENDING_APPROVAL';
+      initialStepName = `Awaiting ${execTitle} approval`;
+    } else if (policy === 'DEAN') {
+      initialStatus = 'PENDING_APPROVAL';
+      initialStepName = `Awaiting ${deanTitle} approval`;
     } else if (policy === 'DEPT_MANAGER') {
       initialStatus = 'PENDING_APPROVAL';
-      initialStepName = 'Awaiting Department Manager Approval';
+      initialStepName = `Awaiting ${mgrTitle} approval before dispatch to ${dept.name}`;
     }
 
     const newRequest = await requestRepository.create({
@@ -199,60 +243,227 @@ router.post('/', requireAuthentication, async (req: AuthenticatedRequest, res: R
       departmentName: dept.name,
       requestTypeId: reqType?.id,
       requestTypeName: reqType?.name,
-      workflowTemplateId: workflowTemplateId || reqType?.defaultWorkflowId || 'wf-it-support',
-      currentStepId: 'step-it-2',
+      workflowTemplateId: workflowTemplateId || reqType?.defaultWorkflowId || undefined,
+      currentStepId: undefined,
       currentStepName: initialStepName,
       title,
       description,
       priority: priority || reqType?.defaultPriority || 'MEDIUM',
       status: initialStatus,
       approvalPolicy: policy,
+      assigneeId: policy === 'DIRECT' ? targetDeptManager?.id : undefined,
+      assigneeName: (policy === 'DIRECT' && targetDeptManager) ? `${targetDeptManager.name} (${mgrTitle})` : undefined,
       dueDate
     });
 
-    // If approval required, create pending approval record
-    if (policy === 'EXECUTIVE_ONLY' || policy === 'MULTI_TIER_CHAIN') {
-      const adminUser = (await userRepository.findAll(orgId)).find(u => u.role === 'SUPER_ADMIN') || { id: 'user-superadmin', name: 'Office of the Vice-Chancellor / Executive' };
+    if (policy === 'DIRECT') {
+      // Direct policy routes straight to the operational department queue
+      const timelineTitle = isExemptExecutive
+        ? `Executive Direct Dispatch to ${dept.name}`
+        : `Dispatched Directly to ${dept.name}`;
+      const timelineDetails = isExemptExecutive
+        ? `Dispatched directly by ${user.name} (${requesterRoleTitle}). Pre-approval requirements bypassed; routed immediately into ${dept.name} (${terms.unit}) execution queue.`
+        : `Routed directly to ${dept.name} (${terms.unit}) queue for operational execution without approval bottlenecks.`;
+
+      await requestRepository.addTimelineEvent(orgId, newRequest.requestId, {
+        actorId: user.id,
+        actorName: user.name,
+        eventType: 'STATUS_CHANGE',
+        title: timelineTitle,
+        details: timelineDetails
+      });
+
+      if (targetDeptManager) {
+        // Auto-create initial operational execution task for the target department manager
+        await taskRepository.create({
+          requestId: newRequest.requestId,
+          requestTitle: newRequest.title,
+          organizationId: orgId,
+          departmentId: dept.id,
+          title: `Direct Execution: ${newRequest.title}`,
+          description: `Direct operational requisition received from ${user.name} (Requester). Priority: ${newRequest.priority}. Details: ${newRequest.description}`,
+          taskType: 'Operational Execution',
+          assigneeId: targetDeptManager.id,
+          assigneeName: targetDeptManager.name,
+          createdById: user.id,
+          createdByName: user.name,
+          status: 'TODO'
+        });
+
+        await notificationRepository.create({
+          userId: targetDeptManager.id,
+          organizationId: orgId,
+          title: `New Direct Request in ${dept.name}: ${newRequest.requestId}`,
+          message: `${user.name} submitted "${newRequest.title}" directly to your ${terms.unit.toLowerCase()} queue for immediate execution.`,
+          type: 'REQUEST',
+          link: newRequest.requestId,
+          read: false
+        });
+      }
+
+      await notificationRepository.create({
+        userId: user.id,
+        organizationId: orgId,
+        title: `Request Dispatched: ${newRequest.requestId}`,
+        message: `Your request "${newRequest.title}" has been routed directly to ${dept.name} and is now active for execution.`,
+        type: 'REQUEST',
+        link: newRequest.requestId,
+        read: false
+      });
+    } else if (policy === 'MULTI_TIER_CHAIN') {
+      const deptMgr = targetDeptManager ||
+                      allOrgUsers.find(u => u.role === 'MANAGER') ||
+                      allOrgUsers.find(u => u.role === 'SUPER_ADMIN') ||
+                      user;
+      const mgrId = deptMgr.id;
+      const mgrName = deptMgr.name;
+
+      await requestRepository.addApproval(orgId, newRequest.requestId, {
+        requestId: newRequest.requestId,
+        stepId: 'tier-1-dept-manager',
+        approverId: mgrId,
+        approverName: `${mgrName} (${mgrTitle})`,
+        status: 'PENDING'
+      });
+
+      await requestRepository.update(orgId, newRequest.id, {
+        currentStepName: `Awaiting ${mgrTitle} approval (step 1 of 3)`
+      });
+
+      await requestRepository.addTimelineEvent(orgId, newRequest.requestId, {
+        actorId: user.id,
+        actorName: user.name,
+        eventType: 'STATUS_CHANGE',
+        title: `Submitted for Multi-Tier Approval`,
+        details: `Tier 1 review initiated by ${mgrName} (${mgrTitle}).`
+      });
+
+      if (mgrId) {
+        await notificationRepository.create({
+          userId: mgrId,
+          organizationId: orgId,
+          title: `Approval required: ${newRequest.requestId}`,
+          message: `${user.name} submitted request "${newRequest.title}" awaiting your review before escalating.`,
+          type: 'APPROVAL',
+          link: newRequest.requestId,
+          read: false
+        });
+      }
+    } else if (policy === 'EXECUTIVE_ONLY') {
+      const adminUser = allOrgUsers.find(u => u.role === 'SUPER_ADMIN') ||
+                        allOrgUsers.find(u => u.role === 'ORG_ADMIN') ||
+                        user;
+
       await requestRepository.addApproval(orgId, newRequest.requestId, {
         requestId: newRequest.requestId,
         stepId: 'approval-exec',
         approverId: adminUser.id,
-        approverName: 'Office of the Vice-Chancellor / Executive Authority',
+        approverName: `${adminUser.name} (${execTitle})`,
         status: 'PENDING'
+      });
+
+      await requestRepository.update(orgId, newRequest.id, {
+        currentStepName: `Awaiting ${execTitle} approval`
+      });
+
+      await requestRepository.addTimelineEvent(orgId, newRequest.requestId, {
+        actorId: user.id,
+        actorName: user.name,
+        eventType: 'STATUS_CHANGE',
+        title: `Submitted for Executive Approval`,
+        details: `Executive authorization required by ${adminUser.name} (${execTitle}).`
       });
 
       await notificationRepository.create({
         userId: adminUser.id,
         organizationId: orgId,
-        title: `Executive Approval Gate: ${newRequest.requestId}`,
-        message: `${user.name} submitted request "${newRequest.title}" awaiting executive sign-off.`,
+        title: `Approval required: ${newRequest.requestId}`,
+        message: `${user.name} submitted "${newRequest.title}" for your executive approval.`,
         type: 'APPROVAL',
         link: newRequest.requestId,
         read: false
       });
+    } else if (policy === 'DEAN') {
+      const deanUser =
+        (dept.faculty ? allOrgUsers.find(u => u.role === 'DEAN' && u.faculty?.toLowerCase() === dept.faculty?.toLowerCase()) : undefined) ||
+        allOrgUsers.find(u => u.role === 'DEAN') ||
+        allOrgUsers.find(u => u.role === 'SUPER_ADMIN') ||
+        allOrgUsers.find(u => u.role === 'ORG_ADMIN') ||
+        user;
+
+      const deanId = deanUser.id;
+      const deanName = deanUser.name;
+
+      await requestRepository.addApproval(orgId, newRequest.requestId, {
+        requestId: newRequest.requestId,
+        stepId: 'approval-dean',
+        approverId: deanId,
+        approverName: `${deanName} (${deanTitle}${dept.faculty ? ` - ${dept.faculty}` : ''})`,
+        status: 'PENDING'
+      });
+
+      await requestRepository.update(orgId, newRequest.id, {
+        currentStepName: `Awaiting ${deanTitle} approval`
+      });
+
+      await requestRepository.addTimelineEvent(orgId, newRequest.requestId, {
+        actorId: user.id,
+        actorName: user.name,
+        eventType: 'STATUS_CHANGE',
+        title: `Submitted for ${deanTitle} Approval`,
+        details: `Requisition awaiting review & authorization by ${deanName} (${deanTitle}${dept.faculty ? ` - ${dept.faculty}` : ''}).`
+      });
+
+      if (deanId) {
+        await notificationRepository.create({
+          userId: deanId,
+          organizationId: orgId,
+          title: `Approval required: ${newRequest.requestId}`,
+          message: `${user.name} submitted request "${newRequest.title}" for ${dept.name} awaiting your approval.`,
+          type: 'APPROVAL',
+          link: newRequest.requestId,
+          read: false
+        });
+      }
     } else if (policy === 'DEPT_MANAGER') {
-      const mgrId = dept.managerId || 'user-superadmin';
-      const mgrName = dept.managerName || `${dept.name} Manager`;
+      const deptMgr = targetDeptManager ||
+                      allOrgUsers.find(u => u.role === 'MANAGER') ||
+                      allOrgUsers.find(u => u.role === 'SUPER_ADMIN') ||
+                      user;
+      const mgrId = deptMgr.id;
+      const mgrName = deptMgr.name;
+
       await requestRepository.addApproval(orgId, newRequest.requestId, {
         requestId: newRequest.requestId,
         stepId: 'approval-manager',
         approverId: mgrId,
-        approverName: mgrName,
+        approverName: `${mgrName} (${mgrTitle})`,
         status: 'PENDING'
       });
-    }
 
-    // Notify Department Manager
-    if (dept.managerId) {
-      await notificationRepository.create({
-        userId: dept.managerId,
-        organizationId: orgId,
-        title: `New ${dept.code} Request Submitted`,
-        message: `${user.name} submitted request ${newRequest.requestId}: "${newRequest.title}".`,
-        type: 'REQUEST',
-        link: newRequest.requestId,
-        read: false
+      await requestRepository.update(orgId, newRequest.id, {
+        currentStepName: `Awaiting ${mgrTitle} approval`
       });
+
+      await requestRepository.addTimelineEvent(orgId, newRequest.requestId, {
+        actorId: user.id,
+        actorName: user.name,
+        eventType: 'STATUS_CHANGE',
+        title: `Submitted for ${mgrTitle} Approval`,
+        details: `Requisition awaiting authorization by ${mgrName} (${mgrTitle}).`
+      });
+
+      if (mgrId) {
+        await notificationRepository.create({
+          userId: mgrId,
+          organizationId: orgId,
+          title: `Approval required: ${newRequest.requestId}`,
+          message: `${user.name} submitted request "${newRequest.title}" awaiting your authorization.`,
+          type: 'APPROVAL',
+          link: newRequest.requestId,
+          read: false
+        });
+      }
     }
 
     // Audit log
@@ -421,14 +632,29 @@ router.post('/:id/approvals/:approvalId', requireAuthentication, async (req: Aut
     return;
   }
 
-  // RBAC verification: Only Super Admin, Org Admin, or Manager of the department can sign approvals
-  const isExecutive = user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN';
-  const isDeptManager = user.role === 'MANAGER' && user.departmentId === request.departmentId;
+  // RBAC verification: Verify authority for the specific approval step
+  const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN';
+  const isDean = user.role === 'DEAN';
+  const isDeptManager = user.role === 'MANAGER' && (!user.departmentId || user.departmentId === request.departmentId);
 
-  if (!isExecutive && !isDeptManager) {
+  const currentApproval = request.approvals?.find(a => a.id === approvalId);
+  const stepId = currentApproval?.stepId || '';
+
+  let isAuthorized = false;
+  if (isSuperAdmin) {
+    isAuthorized = true; // Top executive has ultimate authority and signs the final step
+  } else if (currentApproval?.approverId === user.id) {
+    isAuthorized = true; // Explicitly assigned approver
+  } else if (isDean && (stepId === 'tier-2-dean' || stepId === 'approval-dean' || request.approvalPolicy === 'DEAN' || request.approvalPolicy === 'EXECUTIVE_ONLY')) {
+    isAuthorized = true;
+  } else if (isDeptManager && (stepId === 'tier-1-dept-manager' || stepId === 'approval-manager' || request.approvalPolicy === 'DEPT_MANAGER')) {
+    isAuthorized = true;
+  }
+
+  if (!isAuthorized) {
     res.status(403).json({
       success: false,
-      error: { code: 'FORBIDDEN', message: 'You do not have administrative authority to sign this approval.' }
+      error: { code: 'FORBIDDEN', message: 'You do not have administrative authority to sign this approval tier.' }
     });
     return;
   }
@@ -439,13 +665,13 @@ router.post('/:id/approvals/:approvalId', requireAuthentication, async (req: Aut
     return;
   }
 
-  let stepName = request.currentStepName;
+  const terms = await loadTerms(orgId);
+  const actorTitle = terms.roles[user.role] || user.role;
 
-  if (decision === 'APPROVED') {
-    stepName = `Approved by ${user.name} (${user.role}) — Active for Execution`;
-
+  if (decision === 'REJECTED') {
+    const stepName = `Rejected by ${user.name} (${actorTitle})`;
     await requestRepository.update(orgId, request.id, {
-      status: 'ACTIVE',
+      status: 'REJECTED',
       currentStepName: stepName
     });
 
@@ -453,32 +679,220 @@ router.post('/:id/approvals/:approvalId', requireAuthentication, async (req: Aut
       actorId: user.id,
       actorName: user.name,
       eventType: 'APPROVAL',
-      title: `Approval Granted by ${user.name}`,
-      details: notes || `Executive sign-off recorded under ${user.role} authority.`
+      title: `Request rejected by ${user.name}`,
+      details: notes || `Rejected by the ${actorTitle}.`
     });
 
-    // Auto-generate actionable task in department queue for technicians/operators to execute!
-    await taskRepository.create({
-      requestId: request.requestId,
-      requestTitle: request.title,
+    await notificationRepository.create({
+      userId: request.requesterId,
       organizationId: orgId,
-      departmentId: request.departmentId,
-      title: `Execute Approved Action: ${request.title}`,
-      description: `Action authorized by ${user.name}. Instructions: ${notes || 'Proceed with standard operational execution.'}`,
-      taskType: 'Operational Execution',
-      assigneeId: user.id,
-      assigneeName: `${request.departmentName || 'Department'} Queue`,
-      createdById: user.id,
-      createdByName: user.name,
-      status: 'TODO'
+      title: 'Request Rejected',
+      message: `Your request "${request.title}" was rejected by ${user.name}. Reason: ${notes || 'No notes provided.'}`,
+      type: 'APPROVAL',
+      link: request.requestId,
+      read: false
     });
+
+    const updated = await requestRepository.findById(orgId, id);
+    res.json({ success: true, data: updated });
+    return;
+  }
+
+  // Handle APPROVED decision
+  if (decision === 'APPROVED') {
+    const isMultiTierChain = request.approvalPolicy === 'MULTI_TIER_CHAIN' ||
+      stepId.startsWith('tier-') ||
+      (request.currentStepName && request.currentStepName.includes('Tier '));
+
+    if (isMultiTierChain) {
+      const allUsers = await userRepository.findAll(orgId);
+      const { MANAGER: mgrTitle, DEAN: deanTitle, SUPER_ADMIN: execTitle } = terms.roles;
+
+      if (stepId === 'tier-1-dept-manager') {
+        const deanUser = allUsers.find(u => u.role === 'DEAN');
+
+        if (deanUser) {
+          // Advance to step 2: Dean-level approver
+          await requestRepository.addApproval(orgId, request.requestId, {
+            requestId: request.requestId,
+            stepId: 'tier-2-dean',
+            approverId: deanUser.id,
+            approverName: `${deanUser.name} (${deanTitle})`,
+            status: 'PENDING'
+          });
+
+          await requestRepository.update(orgId, request.id, {
+            currentStepName: `Awaiting ${deanTitle} approval (step 2 of 3)`
+          });
+
+          await requestRepository.addTimelineEvent(orgId, request.requestId, {
+            actorId: user.id,
+            actorName: user.name,
+            eventType: 'APPROVAL',
+            title: `Approved by ${user.name} (${mgrTitle})`,
+            details: notes ? `${notes}. Forwarded to ${deanUser.name} (${deanTitle}).` : `Forwarded to ${deanUser.name} (${deanTitle}).`
+          });
+
+          await notificationRepository.create({
+            userId: deanUser.id,
+            organizationId: orgId,
+            title: `Approval required: ${request.requestId}`,
+            message: `${user.name} (${mgrTitle}) approved "${request.title}". It now needs your approval.`,
+            type: 'APPROVAL',
+            link: request.requestId,
+            read: false
+          });
+
+          const updated = await requestRepository.findById(orgId, id);
+          res.json({ success: true, data: updated });
+          return;
+        } else {
+          // No dean-level approver configured, go straight to the top executive
+          const adminUser = allUsers.find(u => u.role === 'SUPER_ADMIN') ||
+                            allUsers.find(u => u.role === 'ORG_ADMIN') ||
+                            user;
+
+          await requestRepository.addApproval(orgId, request.requestId, {
+            requestId: request.requestId,
+            stepId: 'tier-3-super-admin',
+            approverId: adminUser.id,
+            approverName: `${adminUser.name} (${execTitle})`,
+            status: 'PENDING'
+          });
+
+          await requestRepository.update(orgId, request.id, {
+            currentStepName: `Awaiting ${execTitle} approval (step 2 of 2)`
+          });
+
+          await requestRepository.addTimelineEvent(orgId, request.requestId, {
+            actorId: user.id,
+            actorName: user.name,
+            eventType: 'APPROVAL',
+            title: `Approved by ${user.name} (${mgrTitle})`,
+            details: notes ? `${notes}. Forwarded to the ${execTitle}.` : `Forwarded to the ${execTitle}.`
+          });
+
+          if (adminUser.id) {
+            await notificationRepository.create({
+              userId: adminUser.id,
+              organizationId: orgId,
+              title: `Final approval required: ${request.requestId}`,
+              message: `${user.name} (${mgrTitle}) approved "${request.title}". It now needs your final approval.`,
+              type: 'APPROVAL',
+              link: request.requestId,
+              read: false
+            });
+          }
+
+          const updated = await requestRepository.findById(orgId, id);
+          res.json({ success: true, data: updated });
+          return;
+        }
+      } else if (stepId === 'tier-2-dean') {
+        // Step 2 approved, advance to final step: top executive
+        const adminUser = allUsers.find(u => u.role === 'SUPER_ADMIN') ||
+                          allUsers.find(u => u.role === 'ORG_ADMIN') ||
+                          user;
+
+        await requestRepository.addApproval(orgId, request.requestId, {
+          requestId: request.requestId,
+          stepId: 'tier-3-super-admin',
+          approverId: adminUser.id,
+          approverName: `${adminUser.name} (${execTitle})`,
+          status: 'PENDING'
+        });
+
+        await requestRepository.update(orgId, request.id, {
+          currentStepName: `Awaiting ${execTitle} approval (step 3 of 3)`
+        });
+
+        await requestRepository.addTimelineEvent(orgId, request.requestId, {
+          actorId: user.id,
+          actorName: user.name,
+          eventType: 'APPROVAL',
+          title: `Approved by ${user.name} (${deanTitle})`,
+          details: notes ? `${notes}. Forwarded to ${adminUser.name} (${execTitle}).` : `Forwarded to ${adminUser.name} (${execTitle}).`
+        });
+
+        if (adminUser.id) {
+          await notificationRepository.create({
+            userId: adminUser.id,
+            organizationId: orgId,
+            title: `Final approval required: ${request.requestId}`,
+            message: `${user.name} (${deanTitle}) approved "${request.title}". It now needs your final approval.`,
+            type: 'APPROVAL',
+            link: request.requestId,
+            read: false
+          });
+        }
+
+        const updated = await requestRepository.findById(orgId, id);
+        res.json({ success: true, data: updated });
+        return;
+      }
+      // If tier-3-super-admin was approved, fall through to complete approval & activate!
+    }
+
+    // Final Approval Reached! Route the request to the target department for execution
+    const deptUnitLabel = request.departmentName || terms.unit;
+    const stepName = `Approved — sent to ${deptUnitLabel} queue`;
+
+    // Resolve the Head of the target department (NOT the approver)
+    const targetDept = await departmentRepository.findById(orgId, request.departmentId);
+    const orgUsers = await userRepository.findAll(orgId);
+    const hod =
+      (targetDept?.managerId ? orgUsers.find(u => u.id === targetDept.managerId) : undefined) ||
+      orgUsers.find(u => u.role === 'MANAGER' && u.departmentId === request.departmentId);
+
+    await requestRepository.update(orgId, request.id, {
+      status: 'ACTIVE',
+      currentStepName: stepName,
+      assigneeId: hod?.id,
+      assigneeName: hod ? `${hod.name} (${terms.roles.MANAGER})` : undefined
+    });
+
+    await requestRepository.addTimelineEvent(orgId, request.requestId, {
+      actorId: user.id,
+      actorName: user.name,
+      eventType: 'APPROVAL',
+      title: `Final approval granted by ${user.name}`,
+      details: `${notes ? notes + '. ' : ''}Forwarded to ${deptUnitLabel}${hod ? ` (${hod.name}, ${terms.roles.MANAGER})` : ''} for execution.`
+    });
+
+    // Auto-generate the execution task in the target department's queue, owned by its HOD
+    if (hod) {
+      await taskRepository.create({
+        requestId: request.requestId,
+        requestTitle: request.title,
+        organizationId: orgId,
+        departmentId: request.departmentId,
+        title: `Execute Approved Action: ${request.title}`,
+        description: `Authorized by ${user.name} (${actorTitle}). Instructions: ${notes || 'Proceed with standard operational execution.'}`,
+        taskType: 'Operational Execution',
+        assigneeId: hod.id,
+        assigneeName: hod.name,
+        createdById: user.id,
+        createdByName: user.name,
+        status: 'TODO'
+      });
+
+      await notificationRepository.create({
+        userId: hod.id,
+        organizationId: orgId,
+        title: `Approved request routed to your ${terms.unit.toLowerCase()}: ${request.requestId}`,
+        message: `"${request.title}" received final approval from ${user.name} (${actorTitle}) and is now in the ${deptUnitLabel} queue for execution.`,
+        type: 'REQUEST',
+        link: request.requestId,
+        read: false
+      });
+    }
 
     // Notify Requester
     await notificationRepository.create({
       userId: request.requesterId,
       organizationId: orgId,
       title: 'Approval Granted 🎉',
-      message: `Your request ${request.requestId} ("${request.title}") has been approved by ${user.name} and is now active for execution.`,
+      message: `Your request "${request.title}" has been authorized by ${user.name} and is now active for execution.`,
       type: 'APPROVAL',
       link: request.requestId,
       read: false
@@ -491,42 +905,6 @@ router.post('/:id/approvals/:approvalId', requireAuthentication, async (req: Aut
       'Request',
       request.requestId,
       { approver: user.name, decision: 'APPROVED', notes }
-    );
-
-  } else {
-    // REJECTED
-    stepName = `Declined by ${user.name}: ${notes || 'Declined'}`;
-
-    await requestRepository.update(orgId, request.id, {
-      status: 'REJECTED',
-      currentStepName: stepName
-    });
-
-    await requestRepository.addTimelineEvent(orgId, request.requestId, {
-      actorId: user.id,
-      actorName: user.name,
-      eventType: 'APPROVAL',
-      title: `Request Declined by ${user.name}`,
-      details: notes || 'Approval declined by executive authority.'
-    });
-
-    await notificationRepository.create({
-      userId: request.requesterId,
-      organizationId: orgId,
-      title: 'Request Declined',
-      message: `Your request ${request.requestId} was not approved. Reason: ${notes || 'Declined by executive.'}`,
-      type: 'APPROVAL',
-      link: request.requestId,
-      read: false
-    });
-
-    await auditRepository.log(
-      orgId,
-      { id: user.id, name: user.name, role: user.role },
-      'APPROVAL_REJECTED',
-      'Request',
-      request.requestId,
-      { approver: user.name, decision: 'REJECTED', notes }
     );
   }
 
