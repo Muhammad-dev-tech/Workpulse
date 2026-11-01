@@ -476,7 +476,7 @@ export const App: React.FC = () => {
 
           {/* Audit Trail View */}
           {currentTab === 'audit' && (
-            <AuditLogView />
+            <AuditLogView currentUser={currentUser} />
           )}
 
           {/* Members & Roles Tab View */}
