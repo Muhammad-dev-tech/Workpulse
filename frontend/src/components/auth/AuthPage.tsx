@@ -1,7 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { UserPersona, UserRole } from '../../types';
-import { Mail, Lock, User, AlertCircle, Building2, GraduationCap, BookOpen, Stethoscope, Landmark, Heart, Check, Activity } from 'lucide-react';
+import {
+  Mail,
+  Lock,
+  User,
+  AlertCircle,
+  Building2,
+  GraduationCap,
+  BookOpen,
+  Stethoscope,
+  Landmark,
+  Heart,
+  Check,
+  Activity,
+  KeyRound,
+  ArrowLeft,
+  Copy
+} from 'lucide-react';
 import { ORG_TYPE_OPTIONS, OrganizationType, getTerminology, inferOrgTypeFromName } from '../../terminology';
 
 const ORG_TYPE_ICONS: Record<OrganizationType, React.ElementType> = {
@@ -18,9 +34,19 @@ interface AuthPageProps {
 }
 
 export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
-  const [tab, setTab] = useState<'login' | 'register'>('login');
+  const [tab, setTab] = useState<'login' | 'register' | 'forgot'>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successInfo, setSuccessInfo] = useState<string | null>(null);
+
+  // Forgot password state
+  const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [receivedCode, setReceivedCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState('');
@@ -83,6 +109,82 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
       loadDepartments(selectedOrgId);
     }
   }, [selectedOrgId, orgMode]);
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  const handleRequestCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      setError('Please enter your registered email address.');
+      return;
+    }
+    setError(null);
+    setSuccessInfo(null);
+    setLoading(true);
+
+    try {
+      const res = await api.forgotPassword(forgotEmail.trim());
+      if (res.recoveryCode) {
+        setReceivedCode(res.recoveryCode);
+        setRecoveryCode(res.recoveryCode);
+      }
+      setSuccessInfo(res.message || 'Recovery code generated successfully.');
+      setForgotStep('reset');
+    } catch (err: any) {
+      setError(err.message || 'Could not initiate password reset.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      setError('Email address is required.');
+      return;
+    }
+    if (!recoveryCode.trim()) {
+      setError('6-digit recovery code is required.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      setError('New password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match.');
+      return;
+    }
+
+    setError(null);
+    setSuccessInfo(null);
+    setLoading(true);
+
+    try {
+      const res = await api.resetPassword({
+        email: forgotEmail.trim(),
+        code: recoveryCode.trim(),
+        newPassword
+      });
+      setTab('login');
+      setLoginEmail(forgotEmail.trim());
+      setLoginPassword('');
+      setSuccessInfo(res.message || 'Password reset successfully! Please sign in with your new password.');
+      setForgotStep('request');
+      setReceivedCode(null);
+      setRecoveryCode('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset password.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,31 +263,41 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
         {/* Card Box */}
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-7 shadow-xs">
-          {/* Tabs */}
-          <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800/80 p-1 mb-5">
-            <button
-              type="button"
-              onClick={() => { setTab('login'); setError(null); }}
-              className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition ${
-                tab === 'login'
-                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => { setTab('register'); setError(null); }}
-              className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition ${
-                tab === 'register'
-                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              Create Account
-            </button>
-          </div>
+          {/* Tabs (Hidden in forgot password mode) */}
+          {tab !== 'forgot' && (
+            <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800/80 p-1 mb-5">
+              <button
+                type="button"
+                onClick={() => { setTab('login'); setError(null); setSuccessInfo(null); }}
+                className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition ${
+                  tab === 'login'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTab('register'); setError(null); setSuccessInfo(null); }}
+                className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition ${
+                  tab === 'register'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Create Account
+              </button>
+            </div>
+          )}
+
+          {/* Success Info Banner */}
+          {successInfo && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/30 p-2.5 text-xs text-emerald-700 dark:text-emerald-300">
+              <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+              <div className="font-medium leading-relaxed">{successInfo}</div>
+            </div>
+          )}
 
           {/* Error Banner */}
           {error && (
@@ -218,9 +330,25 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Password
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTab('forgot');
+                      setForgotEmail(loginEmail);
+                      setError(null);
+                      setSuccessInfo(null);
+                      setForgotStep('request');
+                      setReceivedCode(null);
+                    }}
+                    className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:underline transition"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                     <Lock className="h-3.5 w-3.5 text-slate-400" />
@@ -244,6 +372,189 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
             </form>
+          )}
+
+          {/* Forgot Password Flow */}
+          {tab === 'forgot' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('login');
+                    setError(null);
+                    setSuccessInfo(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>Back to Sign In</span>
+                </button>
+                <span className="text-[11px] font-medium text-slate-400">
+                  {forgotStep === 'request' ? 'Step 1 of 2' : 'Step 2 of 2'}
+                </span>
+              </div>
+
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                  {forgotStep === 'request' ? 'Reset your password' : 'Enter recovery code'}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {forgotStep === 'request'
+                    ? 'Enter your registered email address to receive a 6-digit recovery code.'
+                    : 'Enter the 6-digit code and choose a new password for your account.'}
+                </p>
+              </div>
+
+              {/* Code Display Banner (for dev/demo visibility) */}
+              {receivedCode && (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/40 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                      <KeyRound className="h-3.5 w-3.5" />
+                      6-Digit Recovery Code
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCode(receivedCode)}
+                      className="inline-flex items-center gap-1 rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50 transition shadow-2xs"
+                    >
+                      {codeCopied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3 text-slate-500" />}
+                      <span>{codeCopied ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <div className="text-2xl font-mono font-black tracking-widest text-emerald-700 dark:text-emerald-300 text-center py-1 select-all">
+                    {receivedCode}
+                  </div>
+                  <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400 text-center">
+                    Code expires in 15 minutes. Automatically populated into the form below.
+                  </p>
+                </div>
+              )}
+
+              {forgotStep === 'request' ? (
+                <form onSubmit={handleRequestCode} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Registered Email
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                        <Mail className="h-3.5 w-3.5 text-slate-400" />
+                      </div>
+                      <input
+                        type="email"
+                        required
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="name@company.com"
+                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 px-4 text-xs font-semibold text-white shadow-xs transition disabled:opacity-50 mt-2"
+                  >
+                    {loading ? 'Generating code...' : 'Generate Recovery Code'}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleResetPassword} className="space-y-3.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Account Email
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotStep('request');
+                          setError(null);
+                        }}
+                        className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
+                      >
+                        Change email
+                      </button>
+                    </div>
+                    <input
+                      type="email"
+                      disabled
+                      value={forgotEmail}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/40 py-2 px-3 text-xs text-slate-500 dark:text-slate-400 cursor-not-allowed select-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      6-Digit Recovery Code
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                        <KeyRound className="h-3.5 w-3.5 text-slate-400" />
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        maxLength={6}
+                        value={recoveryCode}
+                        onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, ''))}
+                        placeholder="123456"
+                        className="w-full font-mono tracking-widest rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      New Password (min. 6 characters)
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                        <Lock className="h-3.5 w-3.5 text-slate-400" />
+                      </div>
+                      <input
+                        type="password"
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Confirm New Password
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                        <Lock className="h-3.5 w-3.5 text-slate-400" />
+                      </div>
+                      <input
+                        type="password"
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 px-4 text-xs font-semibold text-white shadow-xs transition disabled:opacity-50 mt-2"
+                  >
+                    {loading ? 'Resetting password...' : 'Set New Password & Sign In'}
+                  </button>
+                </form>
+              )}
+            </div>
           )}
 
           {/* Registration Form */}

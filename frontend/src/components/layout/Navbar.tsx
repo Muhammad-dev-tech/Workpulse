@@ -3,6 +3,7 @@ import { UserPersona, NotificationItem } from '../../types';
 import { Bot, Search, Bell, ChevronDown, LogOut, Globe, Menu, X, Activity, Building2, Shield, User, CheckCircle } from 'lucide-react';
 import { api } from '../../services/api';
 import { getTerminology } from '../../terminology';
+import { EditProfileModal } from '../profile/EditProfileModal';
 
 interface NavbarProps {
   currentUser: UserPersona | null;
@@ -16,6 +17,7 @@ interface NavbarProps {
   availableOrgs?: Array<{ id: string; name: string; orgType?: string }>;
   onToggleMobileMenu?: () => void;
   mobileMenuOpen?: boolean;
+  onProfileUpdated?: (updatedUser: UserPersona) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -29,9 +31,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOrgScopeChange,
   availableOrgs = [],
   onToggleMobileMenu,
-  mobileMenuOpen = false
+  mobileMenuOpen = false,
+  onProfileUpdated
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
@@ -366,8 +370,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                   )}
                 </div>
 
-                {/* Sign Out Action */}
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                {/* Actions: Edit Profile & Sign Out */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                  <button
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      setEditProfileOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  >
+                    <User className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>Edit Profile</span>
+                  </button>
+
                   {onLogout && (
                     <button
                       onClick={() => {
@@ -386,6 +401,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
         </div>
       </div>
+
+      {/* Edit Profile Modal */}
+      {currentUser && (
+        <EditProfileModal
+          isOpen={editProfileOpen}
+          onClose={() => setEditProfileOpen(false)}
+          currentUser={currentUser}
+          onProfileUpdated={(updated) => {
+            onProfileUpdated?.(updated);
+          }}
+        />
+      )}
     </header>
   );
 };

@@ -123,6 +123,56 @@ export const api = {
     throw new Error(json.error?.message || 'Registration failed');
   },
 
+  async updateProfile(payload: {
+    name?: string;
+    currentPassword?: string;
+    newPassword?: string;
+  }): Promise<{ user: UserPersona; token?: string }> {
+    const res = await apiFetch('/api/auth/profile', {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(payload)
+    });
+    const json = await safeJson(res);
+    if (json.success) {
+      if (json.data?.token) {
+        setAuthToken(json.data.token);
+      }
+      return json.data;
+    }
+    throw new Error(json.error?.message || 'Failed to update profile');
+  },
+
+  async forgotPassword(email: string): Promise<{ success: boolean; message: string; recoveryCode?: string; email?: string }> {
+    const res = await apiFetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const json = await safeJson(res);
+    if (json.success) {
+      return json;
+    }
+    throw new Error(json.error?.message || 'Password reset request failed');
+  },
+
+  async resetPassword(payload: {
+    email: string;
+    code: string;
+    newPassword: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const res = await apiFetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await safeJson(res);
+    if (json.success) {
+      return json;
+    }
+    throw new Error(json.error?.message || 'Password reset failed');
+  },
+
   async getOrganizations(): Promise<Array<{ id: string; name: string; orgType?: string }>> {
     try {
       const res = await apiFetch('/api/auth/organizations');

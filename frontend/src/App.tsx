@@ -268,6 +268,11 @@ export const App: React.FC = () => {
 
   const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
 
+  const handleProfileUpdated = (updatedUser: UserPersona) => {
+    setCurrentUser(updatedUser);
+    setPersonas(prev => prev.map(p => p.id === updatedUser.id ? { ...p, ...updatedUser } : p));
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 font-sans transition-colors">
       {/* Top Navbar */}
@@ -286,6 +291,7 @@ export const App: React.FC = () => {
         availableOrgs={availableOrgs}
         onToggleMobileMenu={() => setMobileMenuOpen(prev => !prev)}
         mobileMenuOpen={mobileMenuOpen}
+        onProfileUpdated={handleProfileUpdated}
       />
 
       <div className="flex flex-1 min-h-0">

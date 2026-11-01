@@ -491,6 +491,33 @@ export class MemoryUserRepository implements IUserRepository {
     }
     return JSON.parse(JSON.stringify(user));
   }
+
+  async updateProfile(userId: string, data: { name?: string; passwordHash?: string; avatarUrl?: string }): Promise<User | null> {
+    const user = users.find(u => u.id === userId);
+    if (!user) return null;
+
+    if (data.name !== undefined) {
+      user.name = data.name.trim();
+      if (!data.avatarUrl) {
+        let baseAvatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(data.name.trim())}`;
+        const tags: string[] = [];
+        if (user.role === 'DEAN') tags.push('role=DEAN');
+        if (user.faculty) tags.push(`faculty=${encodeURIComponent(user.faculty)}`);
+        if (tags.length > 0) {
+          baseAvatar = `${baseAvatar}#${tags.join('&')}`;
+        }
+        user.avatarUrl = baseAvatar;
+      }
+    }
+    if (data.avatarUrl !== undefined) {
+      user.avatarUrl = data.avatarUrl;
+    }
+    if (data.passwordHash !== undefined) {
+      user.passwordHash = data.passwordHash;
+    }
+
+    return JSON.parse(JSON.stringify(user));
+  }
 }
 
 export class MemoryNotificationRepository implements INotificationRepository {

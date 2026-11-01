@@ -77,6 +77,7 @@ export interface IUserRepository {
   findAll(organizationId: string): Promise<User[]>;
   create(user: Omit<User, 'id' | 'createdAt'>): Promise<User>;
   updateRoleAndDepartment(userId: string, role: User['role'], departmentId?: string, faculty?: string): Promise<User | null>;
+  updateProfile(userId: string, data: { name?: string; passwordHash?: string; avatarUrl?: string }): Promise<User | null>;
 }
 
 export interface INotificationRepository {

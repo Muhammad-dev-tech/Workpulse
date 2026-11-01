@@ -1183,6 +1183,46 @@ export class SupabaseUserRepository implements IUserRepository {
     if (error || !data) return null;
     return this.mapUser(data);
   }
+
+  async updateProfile(userId: string, data: { name?: string; passwordHash?: string; avatarUrl?: string }): Promise<User | null> {
+    const existing = await this.findById(userId);
+    if (!existing) return null;
+
+    const patch: Record<string, any> = {};
+    if (data.name !== undefined) {
+      patch['name'] = data.name.trim();
+      if (!data.avatarUrl) {
+        let baseAvatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(data.name.trim())}`;
+        const tags: string[] = [];
+        if (existing.role === 'DEAN') tags.push('role=DEAN');
+        if (existing.faculty) tags.push(`faculty=${encodeURIComponent(existing.faculty)}`);
+        if (tags.length > 0) {
+          baseAvatar = `${baseAvatar}#${tags.join('&')}`;
+        }
+        patch['avatar_url'] = baseAvatar;
+      }
+    }
+    if (data.avatarUrl !== undefined) {
+      patch['avatar_url'] = data.avatarUrl;
+    }
+    if (data.passwordHash !== undefined) {
+      patch['password_hash'] = data.passwordHash;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return existing;
+    }
+
+    const { data: updated, error } = await this.db
+      .from('users')
+      .update(patch)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error || !updated) return null;
+    return this.mapUser(updated);
+  }
 }
 
 // ────────────────────────────────────────────────────

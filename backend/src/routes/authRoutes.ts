@@ -359,5 +359,285 @@ router.get('/personas', requireAuthentication, async (req: AuthenticatedRequest,
   });
 });
 
+// In-memory token storage for password recovery codes (15-minute expiry)
+interface PasswordResetTokenRecord {
+  code: string;
+  expiresAt: number;
+  userId: string;
+}
+const passwordResetTokens = new Map<string, PasswordResetTokenRecord>();
+
+// ──────────────────────────────────────────────────────────────────────
+//  PUT /api/auth/profile — update current user's name and/or password
+// ──────────────────────────────────────────────────────────────────────
+router.put('/profile', requireAuthentication, async (req: AuthenticatedRequest, res: Response) => {
+  const { name, currentPassword, newPassword } = req.body;
+  const authUser = req.user!;
+
+  if (name !== undefined && !name.trim()) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_NAME', message: 'Full name cannot be blank.' }
+    });
+    return;
+  }
+
+  // If new password requested, verify current password and minimum length
+  let newPasswordHash: string | undefined = undefined;
+  if (newPassword !== undefined && newPassword !== '') {
+    if (newPassword.length < 6) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_PASSWORD', message: 'New password must be at least 6 characters.' }
+      });
+      return;
+    }
+
+    const fullUser = await userRepository.findById(authUser.id);
+    if (!fullUser) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'User account not found.' }
+      });
+      return;
+    }
+
+    if (fullUser.passwordHash) {
+      if (!currentPassword) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'CURRENT_PASSWORD_REQUIRED', message: 'Current password is required to change your password.' }
+        });
+        return;
+      }
+      const valid = await bcrypt.compare(currentPassword, fullUser.passwordHash);
+      if (!valid) {
+        res.status(401).json({
+          success: false,
+          error: { code: 'INVALID_CURRENT_PASSWORD', message: 'Current password is incorrect.' }
+        });
+        return;
+      }
+    }
+
+    newPasswordHash = await bcrypt.hash(newPassword, 10);
+  }
+
+  const patch: { name?: string; passwordHash?: string } = {};
+  if (name !== undefined) {
+    patch.name = name.trim();
+  }
+  if (newPasswordHash) {
+    patch.passwordHash = newPasswordHash;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    res.json({
+      success: true,
+      data: {
+        user: await toSessionUser(authUser),
+        token: generateToken(authUser)
+      }
+    });
+    return;
+  }
+
+  try {
+    const updated = await userRepository.updateProfile(authUser.id, patch);
+    if (!updated) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'UPDATE_FAILED', message: 'Failed to update user profile.' }
+      });
+      return;
+    }
+
+    try {
+      await auditRepository.log(
+        authUser.organizationId,
+        { id: authUser.id, name: updated.name, role: authUser.role },
+        'USER_PROFILE_UPDATED',
+        'User',
+        authUser.id,
+        {
+          nameChanged: name !== undefined,
+          passwordChanged: !!newPasswordHash,
+          newName: updated.name
+        }
+      );
+    } catch {
+      // non-fatal
+    }
+
+    const newToken = generateToken(updated);
+    res.json({
+      success: true,
+      data: {
+        user: await toSessionUser(updated),
+        token: newToken
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'UPDATE_FAILED', message: err.message || 'Failed to update user profile.' }
+    });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+//  POST /api/auth/forgot-password — generate 6-digit recovery code
+// ──────────────────────────────────────────────────────────────────────
+router.post('/forgot-password', async (req, res: Response) => {
+  const { email } = req.body;
+
+  if (!email || !email.trim()) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_EMAIL', message: 'Please enter your registered email address.' }
+    });
+    return;
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const user = await userRepository.findByEmail(cleanEmail);
+
+  if (!user) {
+    res.status(404).json({
+      success: false,
+      error: { code: 'USER_NOT_FOUND', message: 'No registered user found with this email address.' }
+    });
+    return;
+  }
+
+  // Generate 6-digit numeric recovery code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
+  passwordResetTokens.set(cleanEmail, { code, expiresAt, userId: user.id });
+
+  console.log(`\n========================================`);
+  console.log(`[PASSWORD RECOVERY CODE] Email: ${cleanEmail}`);
+  console.log(`[PASSWORD RECOVERY CODE] Code:  ${code}`);
+  console.log(`[PASSWORD RECOVERY CODE] Expiry: 15 minutes`);
+  console.log(`========================================\n`);
+
+  try {
+    await auditRepository.log(
+      user.organizationId,
+      { id: user.id, name: user.name, role: user.role },
+      'PASSWORD_RESET_REQUESTED',
+      'User',
+      user.id,
+      { email: cleanEmail }
+    );
+  } catch {
+    // non-fatal
+  }
+
+  res.json({
+    success: true,
+    message: 'A 6-digit password recovery code has been generated.',
+    recoveryCode: code,
+    email: cleanEmail
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+//  POST /api/auth/reset-password — verify 6-digit code and set new password
+// ──────────────────────────────────────────────────────────────────────
+router.post('/reset-password', async (req, res: Response) => {
+  const { email, code, newPassword } = req.body;
+
+  if (!email || !email.trim()) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_EMAIL', message: 'Email address is required.' }
+    });
+    return;
+  }
+
+  if (!code || !code.trim()) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_CODE', message: '6-digit recovery code is required.' }
+    });
+    return;
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_PASSWORD', message: 'New password must be at least 6 characters.' }
+    });
+    return;
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const tokenRecord = passwordResetTokens.get(cleanEmail);
+
+  if (!tokenRecord) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_CODE', message: 'No active password recovery request found for this email. Please request a new code.' }
+    });
+    return;
+  }
+
+  if (Date.now() > tokenRecord.expiresAt) {
+    passwordResetTokens.delete(cleanEmail);
+    res.status(400).json({
+      success: false,
+      error: { code: 'EXPIRED_CODE', message: 'The recovery code has expired. Please request a new code.' }
+    });
+    return;
+  }
+
+  if (tokenRecord.code !== code.trim()) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'INCORRECT_CODE', message: 'Incorrect recovery code. Please check and try again.' }
+    });
+    return;
+  }
+
+  const user = await userRepository.findById(tokenRecord.userId) || await userRepository.findByEmail(cleanEmail);
+  if (!user) {
+    res.status(404).json({
+      success: false,
+      error: { code: 'USER_NOT_FOUND', message: 'User account not found.' }
+    });
+    return;
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await userRepository.updateProfile(user.id, { passwordHash });
+    passwordResetTokens.delete(cleanEmail);
+
+    try {
+      await auditRepository.log(
+        user.organizationId,
+        { id: user.id, name: user.name, role: user.role },
+        'PASSWORD_RESET_COMPLETED',
+        'User',
+        user.id,
+        { email: cleanEmail }
+      );
+    } catch {
+      // non-fatal
+    }
+
+    res.json({
+      success: true,
+      message: 'Your password has been successfully reset! You may now sign in with your new password.'
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'RESET_FAILED', message: err.message || 'Failed to reset password.' }
+    });
+  }
+});
+
 export default router;
 
