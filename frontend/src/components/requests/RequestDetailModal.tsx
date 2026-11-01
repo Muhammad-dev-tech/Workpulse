@@ -40,7 +40,7 @@ export const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
   onClose,
   onRefresh
 }) => {
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');

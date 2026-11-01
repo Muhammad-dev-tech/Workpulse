@@ -19,7 +19,7 @@ export const CreateRequestModal: React.FC<CreateRequestModalProps> = ({
   onClose,
   onCreated
 }) => {
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [departmentId, setDepartmentId] = useState(initialDepartmentId || departments[0]?.id || '');

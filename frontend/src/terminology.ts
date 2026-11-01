@@ -190,10 +190,27 @@ export const inferOrgTypeFromName = (name?: string | null): OrganizationType => 
   return 'COMPANY';
 };
 
-export const getTerminology = (type?: string | null, orgName?: string | null): OrgTerminology => {
+export const getTerminology = (
+  type?: string | null,
+  orgName?: string | null,
+  userContext?: { role?: string; faculty?: string; email?: string } | null
+): OrgTerminology => {
   let resolved: OrganizationType = 'COMPANY';
   if (type && type in TERMINOLOGY && type !== 'COMPANY') {
     resolved = type as OrganizationType;
+  } else if (orgName && inferOrgTypeFromName(orgName) !== 'COMPANY') {
+    resolved = inferOrgTypeFromName(orgName);
+  } else if (
+    userContext?.faculty ||
+    userContext?.role === 'DEAN' ||
+    (userContext?.email && (
+      userContext.email.endsWith('.edu') ||
+      userContext.email.endsWith('.ac.ng') ||
+      userContext.email.includes('university') ||
+      userContext.email.includes('faculty')
+    ))
+  ) {
+    resolved = 'UNIVERSITY';
   } else if (orgName) {
     resolved = inferOrgTypeFromName(orgName);
   } else if (type && type in TERMINOLOGY) {
@@ -202,6 +219,46 @@ export const getTerminology = (type?: string | null, orgName?: string | null): O
   return TERMINOLOGY[resolved];
 };
 
-export const roleTitle = (type: string | null | undefined, role: UserRole, orgName?: string | null): string =>
-  getTerminology(type, orgName).roles[role] || role;
+export const roleTitle = (
+  type: string | null | undefined,
+  role: UserRole,
+  orgName?: string | null,
+  userContext?: { role?: string; faculty?: string; email?: string } | null
+): string =>
+  getTerminology(type, orgName, userContext).roles[role] || role;
+
+/**
+ * Safely strips any __WP_META__ or JSON metadata wrappers from department/request descriptions,
+ * ensuring clean, human-readable text is always presented in the UI.
+ */
+export const cleanDeptDescription = (desc?: string | null): string => {
+  if (!desc) return '';
+  let cur = String(desc).trim();
+  for (let i = 0; i < 5; i++) {
+    if (cur.startsWith('__WP_META__:') || (cur.startsWith('{') && cur.includes('"text"'))) {
+      try {
+        const raw = cur.startsWith('__WP_META__:') ? cur.substring('__WP_META__:'.length) : cur;
+        const parsed = JSON.parse(raw);
+        if (parsed.text !== undefined) {
+          cur = String(parsed.text).trim();
+        } else {
+          break;
+        }
+      } catch {
+        const textMatch = cur.match(/"text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+        if (textMatch) {
+          cur = textMatch[1].replace(/\\"/g, '"').trim();
+        }
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+  if (cur.startsWith('__WP_META__:')) {
+    cur = cur.substring('__WP_META__:'.length).trim();
+  }
+  return cur;
+};
+
 

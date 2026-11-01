@@ -50,7 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isEmployee = currentUser?.role === 'EMPLOYEE';
   const isExecutiveTier = isSuperAdmin || isOrgAdmin || isDean;
 
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
 
   // Operational items
   const operationalItems = [
@@ -81,7 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'organizations', label: 'All Organizations', icon: Globe }
     ] : []),
     ...((isSuperAdmin || isOrgAdmin) ? [
-      { id: 'members', label: `${terms.label} Members & Roles`, icon: Users },
+      { id: 'members', label: terms.label === 'University' ? 'University Staff & Roles' : `${terms.label} Members & Roles`, icon: Users },
       { id: 'departments', label: `${terms.unit} Setup`, icon: Building2 }
     ] : (isManager || isDean) ? [
       { id: 'departments', label: terms.units, icon: Building2 }

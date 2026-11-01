@@ -62,6 +62,52 @@ function mapRows<T>(rows: Record<string, any>[]): T[] {
 }
 
 // ────────────────────────────────────────────────────
+//  Metadata and description unpacker
+// ────────────────────────────────────────────────────
+export function extractCleanMeta(rawDesc?: string): { text: string; faculty?: string; approvalPolicy?: string } {
+  if (!rawDesc) return { text: '' };
+  let cur = String(rawDesc).trim();
+  let faculty: string | undefined = undefined;
+  let approvalPolicy: string | undefined = undefined;
+  let text = cur;
+
+  // Recursively unwrap __WP_META__ or JSON wrappers
+  for (let i = 0; i < 5; i++) {
+    if (cur.startsWith('__WP_META__:') || (cur.startsWith('{') && cur.includes('"text"'))) {
+      try {
+        const raw = cur.startsWith('__WP_META__:') ? cur.substring('__WP_META__:'.length) : cur;
+        const parsed = JSON.parse(raw);
+        if (parsed.faculty) faculty = parsed.faculty;
+        if (parsed.approvalPolicy) approvalPolicy = parsed.approvalPolicy;
+        if (parsed.text !== undefined) {
+          text = String(parsed.text);
+          cur = text.trim();
+        } else {
+          break;
+        }
+      } catch {
+        // Fallback regex parsing if JSON string was interrupted or escaped
+        const textMatch = cur.match(/"text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+        if (textMatch) text = textMatch[1].replace(/\\"/g, '"');
+        const facMatch = cur.match(/"faculty"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+        if (facMatch) faculty = facMatch[1].replace(/\\"/g, '"');
+        const polMatch = cur.match(/"approvalPolicy"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+        if (polMatch) approvalPolicy = polMatch[1].replace(/\\"/g, '"');
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  if (text.startsWith('__WP_META__:')) {
+    text = text.substring('__WP_META__:'.length);
+  }
+
+  return { text, faculty, approvalPolicy };
+}
+
+// ────────────────────────────────────────────────────
 //  Department assembler (joins request_types)
 // ────────────────────────────────────────────────────
 async function assembleDepartment(
@@ -79,18 +125,9 @@ async function assembleDepartment(
     let slaHours = r.sla_hours || 48;
     let description = r.description || '';
 
-    if (r.description && (r.description.startsWith('{') || r.description.startsWith('__WP_META__:'))) {
-      try {
-        const raw = r.description.startsWith('__WP_META__:')
-          ? r.description.substring('__WP_META__:'.length)
-          : r.description;
-        const meta = JSON.parse(raw);
-        if (meta.approvalPolicy) approvalPolicy = meta.approvalPolicy;
-        if (meta.requiresApproval !== undefined) requiresApproval = meta.requiresApproval;
-        if (meta.slaHours !== undefined) slaHours = meta.slaHours;
-        description = meta.text || '';
-      } catch {}
-    }
+    const clean = extractCleanMeta(description);
+    if (clean.approvalPolicy) approvalPolicy = clean.approvalPolicy as any;
+    description = clean.text || '';
 
     return {
       id: r.id,
@@ -108,17 +145,10 @@ async function assembleDepartment(
   let approvalPolicy = deptRow.approval_policy || 'DIRECT';
   let description = deptRow.description || '';
 
-  if (description && (description.startsWith('{') || description.startsWith('__WP_META__:'))) {
-    try {
-      const raw = description.startsWith('__WP_META__:')
-        ? description.substring('__WP_META__:'.length)
-        : description;
-      const meta = JSON.parse(raw);
-      if (meta.faculty) faculty = meta.faculty;
-      if (meta.approvalPolicy) approvalPolicy = meta.approvalPolicy;
-      description = meta.text !== undefined ? meta.text : description;
-    } catch {}
-  }
+  const cleanMeta = extractCleanMeta(description);
+  if (cleanMeta.faculty) faculty = cleanMeta.faculty;
+  if (cleanMeta.approvalPolicy) approvalPolicy = cleanMeta.approvalPolicy;
+  description = cleanMeta.text;
 
   return {
     id: deptRow.id,
@@ -874,10 +904,14 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
 
   async create(organizationId: string, data: Omit<Department, 'id' | 'createdAt' | 'organizationId'>): Promise<Department> {
     const code = data.code.toUpperCase();
-    const effectivePolicy = data.approvalPolicy || (data.requiresApproval ? 'APPROVAL_REQUIRED' : 'DIRECT');
+    const cleanMeta = extractCleanMeta(data.description);
+    const effectivePolicy = data.approvalPolicy || cleanMeta.approvalPolicy || (data.requiresApproval ? 'APPROVAL_REQUIRED' : 'DIRECT');
+    const effectiveFaculty = data.faculty || cleanMeta.faculty;
+    const effectiveText = cleanMeta.text || `Department for ${data.name}`;
+
     const metaDesc = `__WP_META__:${JSON.stringify({
-      text: data.description || '',
-      faculty: data.faculty,
+      text: effectiveText,
+      faculty: effectiveFaculty,
       approvalPolicy: effectivePolicy
     })}`;
 
@@ -901,18 +935,21 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
 
     // Insert request types
     if (data.requestTypes && data.requestTypes.length > 0) {
-      const rtRows = data.requestTypes.map(rt => ({
-        department_id: row.id,
-        name: rt.name,
-        description: JSON.stringify({
-          approvalPolicy: rt.approvalPolicy || (rt.requiresApproval ? 'MULTI_TIER_CHAIN' : 'DIRECT'),
-          requiresApproval: rt.approvalPolicy && rt.approvalPolicy !== 'DIRECT' ? true : (rt.requiresApproval || false),
-          slaHours: (rt as any).slaHours || 48,
-          text: rt.description || ''
-        }),
-        default_priority: rt.defaultPriority || 'MEDIUM',
-        default_workflow_id: rt.defaultWorkflowId || null
-      }));
+      const rtRows = data.requestTypes.map(rt => {
+        const rtClean = extractCleanMeta(rt.description);
+        return {
+          department_id: row.id,
+          name: rt.name,
+          description: JSON.stringify({
+            approvalPolicy: rt.approvalPolicy || rtClean.approvalPolicy || (rt.requiresApproval ? 'MULTI_TIER_CHAIN' : 'DIRECT'),
+            requiresApproval: rt.approvalPolicy && rt.approvalPolicy !== 'DIRECT' ? true : (rt.requiresApproval || false),
+            slaHours: (rt as any).slaHours || 48,
+            text: rtClean.text || rt.name
+          }),
+          default_priority: rt.defaultPriority || 'MEDIUM',
+          default_workflow_id: rt.defaultWorkflowId || null
+        };
+      });
       const { error: rtErr } = await this.db.from('department_request_types').insert(rtRows);
       if (rtErr) {
         console.error('Failed to insert department_request_types:', rtErr);
@@ -935,10 +972,10 @@ export class SupabaseDepartmentRepository implements IDepartmentRepository {
     if (data.name !== undefined)            patch['name'] = data.name;
     if (data.description !== undefined || data.faculty !== undefined || data.approvalPolicy !== undefined) {
       const existing = await this.findById(organizationId, id);
-      const text = data.description !== undefined ? data.description : (existing?.description || '');
+      const cleanDesc = data.description !== undefined ? extractCleanMeta(data.description).text : (existing?.description || '');
       const faculty = data.faculty !== undefined ? data.faculty : existing?.faculty;
       const approvalPolicy = data.approvalPolicy !== undefined ? data.approvalPolicy : existing?.approvalPolicy;
-      patch['description'] = `__WP_META__:${JSON.stringify({ text, faculty, approvalPolicy })}`;
+      patch['description'] = `__WP_META__:${JSON.stringify({ text: cleanDesc, faculty, approvalPolicy })}`;
     }
     if (data.responsibilities !== undefined) patch['responsibilities'] = data.responsibilities;
     if (data.taskTypes !== undefined)       patch['task_types'] = data.taskTypes;

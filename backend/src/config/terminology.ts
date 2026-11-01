@@ -157,15 +157,41 @@ export const inferOrgTypeFromName = (name?: string | null): OrganizationType => 
   return 'COMPANY';
 };
 
-export const normalizeOrgType = (value?: string | null): OrganizationType =>
-  value && (ORGANIZATION_TYPES as string[]).includes(value)
-    ? (value as OrganizationType)
-    : DEFAULT_ORGANIZATION_TYPE;
+export const normalizeOrgType = (value?: string | null, name?: string | null): OrganizationType => {
+  if (value && (ORGANIZATION_TYPES as string[]).includes(value) && value !== 'COMPANY') {
+    return value as OrganizationType;
+  }
+  if (name) {
+    const inferred = inferOrgTypeFromName(name);
+    if (inferred !== 'COMPANY') return inferred;
+  }
+  if (value && (ORGANIZATION_TYPES as string[]).includes(value)) {
+    return value as OrganizationType;
+  }
+  return DEFAULT_ORGANIZATION_TYPE;
+};
 
-export const getTerminology = (type?: string | null, orgName?: string | null): OrgTerminology => {
+export const getTerminology = (
+  type?: string | null,
+  orgName?: string | null,
+  userContext?: { role?: string; faculty?: string; email?: string } | null
+): OrgTerminology => {
   let resolved: OrganizationType = 'COMPANY';
   if (type && (ORGANIZATION_TYPES as string[]).includes(type) && type !== 'COMPANY') {
     resolved = type as OrganizationType;
+  } else if (orgName && inferOrgTypeFromName(orgName) !== 'COMPANY') {
+    resolved = inferOrgTypeFromName(orgName);
+  } else if (
+    userContext?.faculty ||
+    userContext?.role === 'DEAN' ||
+    (userContext?.email && (
+      userContext.email.endsWith('.edu') ||
+      userContext.email.endsWith('.ac.ng') ||
+      userContext.email.includes('university') ||
+      userContext.email.includes('faculty')
+    ))
+  ) {
+    resolved = 'UNIVERSITY';
   } else if (orgName) {
     resolved = inferOrgTypeFromName(orgName);
   } else if (type && (ORGANIZATION_TYPES as string[]).includes(type)) {
@@ -176,4 +202,5 @@ export const getTerminology = (type?: string | null, orgName?: string | null): O
 
 export const roleTitle = (type: string | null | undefined, role: UserRole, orgName?: string | null): string =>
   getTerminology(type, orgName).roles[role] || role;
+
 

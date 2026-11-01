@@ -25,7 +25,7 @@ export const PulseAiDrawer: React.FC<PulseAiDrawerProps> = ({
   initialPrompt,
   onSelectRequest
 }) => {
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
 
   const getWelcomeMessage = () => {
     const isExecutive = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ORG_ADMIN' || currentUser?.role === 'DEAN';

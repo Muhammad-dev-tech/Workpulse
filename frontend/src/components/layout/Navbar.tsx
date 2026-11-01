@@ -83,7 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
 
   const getRoleTitle = (role: string) => {
     if (role === 'SUPER_ADMIN') return 'Platform Super Admin';
@@ -131,7 +131,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               ) : (
                 <span className="hidden sm:inline-block rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 uppercase tracking-wide">
-                  {currentUser?.organizationName || 'WORKSPACE'}
+                  {currentUser?.organizationName || (terms.label === 'University' ? 'ZANGINA UNIVERSITY' : `${terms.label.toUpperCase()} WORKSPACE`)}
                 </span>
               )}
             </div>

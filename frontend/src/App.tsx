@@ -19,7 +19,7 @@ import { PlatformOrganizationsView } from './components/admin/PlatformOrganizati
 import { OrganizationMembersView } from './components/admin/OrganizationMembersView';
 import { RequestItem, PendingRadarData, UserPersona, Department, Faculty, TaskItem } from './types';
 import { api } from './services/api';
-import { getTerminology } from './terminology';
+import { getTerminology, cleanDeptDescription } from './terminology';
 import {
   Plus,
   Building2,
@@ -157,7 +157,7 @@ export const App: React.FC = () => {
         api.getDepartments(),
         api.getFaculties().catch(() => [])
       ]);
-      if (meData && currentUser && (meData.role !== currentUser.role || meData.departmentId !== currentUser.departmentId)) {
+      if (meData) {
         setCurrentUser(meData);
       }
       setRadar(radarData);
@@ -266,7 +266,7 @@ export const App: React.FC = () => {
     );
   }
 
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 font-sans transition-colors">
@@ -797,7 +797,7 @@ export const App: React.FC = () => {
                                   </div>
 
                                   <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
-                                    {dept.description}
+                                    {cleanDeptDescription(dept.description)}
                                   </p>
 
                                   {dept.requestTypes.length > 0 && (
@@ -914,7 +914,7 @@ export const App: React.FC = () => {
                                 </div>
 
                                 <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
-                                  {dept.description}
+                                  {cleanDeptDescription(dept.description)}
                                 </p>
 
                                 {dept.requestTypes.length > 0 && (

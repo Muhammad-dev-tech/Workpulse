@@ -24,7 +24,7 @@ export const PendingRadar: React.FC<PendingRadarProps> = ({
   onFilterSelect,
   activeFilter
 }) => {
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
   if (!radar) return null;
 
   const statCards = [

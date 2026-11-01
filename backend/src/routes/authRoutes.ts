@@ -10,8 +10,16 @@ const router = Router();
 
 /** Public user shape returned to the client, enriched with org context. */
 async function toSessionUser(user: User) {
-  const org = await organizationRepository.findById(user.organizationId);
+  let org = await organizationRepository.findById(user.organizationId);
+  if (!org && user.organizationId) {
+    const all = await organizationRepository.findAll();
+    org = all.find(o => o.id === user.organizationId) || null;
+  }
   const faculty = getFacultyForDean(user.organizationId, user.id, user.faculty);
+  const resolvedOrgType = normalizeOrgType(
+    org?.orgType,
+    org?.name || (faculty || user.role === 'DEAN' || user.email.includes('.edu') ? 'University' : undefined)
+  );
   return {
     id: user.id,
     name: user.name,
@@ -20,8 +28,8 @@ async function toSessionUser(user: User) {
     departmentId: user.departmentId,
     faculty,
     organizationId: user.organizationId,
-    organizationName: org?.name,
-    organizationType: normalizeOrgType(org?.orgType),
+    organizationName: org?.name || (resolvedOrgType === 'UNIVERSITY' ? 'University' : undefined),
+    organizationType: resolvedOrgType,
     avatarUrl: user.avatarUrl
   };
 }

@@ -42,7 +42,7 @@ export const OrganizationMembersView: React.FC<OrganizationMembersViewProps> = (
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const terms = getTerminology(currentUser.organizationType, currentUser.organizationName);
+  const terms = getTerminology(currentUser.organizationType, currentUser.organizationName, currentUser);
 
   const loadMembers = async () => {
     setLoading(true);

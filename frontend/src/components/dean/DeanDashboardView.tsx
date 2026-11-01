@@ -4,7 +4,7 @@ import {
   Search, ShieldCheck, ChevronRight, Layers, ArrowUpRight, Zap, FileText, Filter
 } from 'lucide-react';
 import { Department, Faculty, RequestItem, UserPersona } from '../../types';
-import { getTerminology } from '../../terminology';
+import { getTerminology, cleanDeptDescription } from '../../terminology';
 import { ReassignHodModal } from '../departments/ReassignHodModal';
 
 interface DeanDashboardViewProps {
@@ -36,7 +36,7 @@ export const DeanDashboardView: React.FC<DeanDashboardViewProps> = ({
   onApproveRequest,
   onRejectRequest
 }) => {
-  const terms = getTerminology(currentUser.organizationType, currentUser.organizationName);
+  const terms = getTerminology(currentUser.organizationType, currentUser.organizationName, currentUser);
   const [activeTab, setActiveTab] = useState<'departments' | 'staff' | 'approvals' | 'radar'>('departments');
   const [staffSearch, setStaffSearch] = useState('');
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('ALL');
@@ -361,7 +361,7 @@ export const DeanDashboardView: React.FC<DeanDashboardViewProps> = ({
                             </span>
                           </div>
                           <p className="text-xs text-slate-500 line-clamp-2 mt-1">
-                            {dept.description || 'Academic department'}
+                            {cleanDeptDescription(dept.description) || 'Academic department'}
                           </p>
                         </div>
                       </div>

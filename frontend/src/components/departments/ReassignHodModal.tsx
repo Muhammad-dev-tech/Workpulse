@@ -19,7 +19,7 @@ export const ReassignHodModal: React.FC<ReassignHodModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  const terms = getTerminology(currentUser.organizationType, currentUser.organizationName);
+  const terms = getTerminology(currentUser.organizationType, currentUser.organizationName, currentUser);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [actionType, setActionType] = useState<'REASSIGN' | 'VACATE'>('REASSIGN');
   const [submitting, setSubmitting] = useState(false);

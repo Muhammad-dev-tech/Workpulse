@@ -21,7 +21,7 @@ export const AssignTaskModal: React.FC<AssignTaskModalProps> = ({
   onClose,
   onAssigned
 }) => {
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [taskType, setTaskType] = useState(department?.taskTypes[0] || 'Diagnose issue');

@@ -21,7 +21,7 @@ export const CreateDepartmentModal: React.FC<CreateDepartmentModalProps> = ({
   onClose,
   onCreated
 }) => {
-  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName);
+  const terms = getTerminology(currentUser?.organizationType, currentUser?.organizationName, currentUser);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [selectedFaculty, setSelectedFaculty] = useState<string>(initialFaculty);
