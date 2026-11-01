@@ -18,6 +18,7 @@ interface NavbarProps {
   onToggleMobileMenu?: () => void;
   mobileMenuOpen?: boolean;
   onProfileUpdated?: (updatedUser: UserPersona) => void;
+  refreshTrigger?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -32,7 +33,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   availableOrgs = [],
   onToggleMobileMenu,
   mobileMenuOpen = false,
-  onProfileUpdated
+  onProfileUpdated,
+  refreshTrigger
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
@@ -43,7 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (currentUser) {
       loadNotifications();
     }
-  }, [currentUser]);
+  }, [currentUser, refreshTrigger]);
 
   const loadNotifications = async () => {
     try {

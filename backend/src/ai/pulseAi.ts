@@ -429,9 +429,15 @@ export class PulseAiService {
     // ── Gemini path ────────────────────────────────────────────
     if (this.useGemini && this.genai) {
       try {
-        response = await this.processWithGemini(user, organizationId, query, conversationHistory);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('GEMINI_TIMEOUT_3000MS')), 3000)
+        );
+        response = await Promise.race([
+          this.processWithGemini(user, organizationId, query, conversationHistory),
+          timeoutPromise
+        ]);
       } catch (err: any) {
-        console.error('  ⚠️ Pulse AI: Gemini call encountered error, falling back to rule engine:', err?.message || err);
+        console.warn('  ⚠️ Pulse AI: Gemini call timed out or failed, falling back to high-speed engine:', err?.message || err);
         response = await this.processWithKeywords(user, organizationId, query);
       }
     } else {
@@ -605,7 +611,7 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
     };
   }
 
-  // ───── Keyword Fallback Path (no Gemini API key) ──────────
+  // ───── Keyword Fallback Path (no Gemini API key or timed out) ──────────
   private async processWithKeywords(
     user: User,
     organizationId: string,
@@ -615,11 +621,11 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
     const toolResults: ToolExecutionResult[] = [];
 
     // 1. Specific request query: REQ-XXXX
-    const reqIdMatch = query.match(/req-(\d+)/i);
+    const reqIdMatch = query.match(/req-(\d+)/i) || query.match(/req-[a-z0-9\-]+/i);
     const stuckKeywords = q.includes('stuck') || q.includes('delayed') || q.includes('blocked') || q.includes('waiting');
 
     if (reqIdMatch || (stuckKeywords && !q.includes('department'))) {
-      const targetReqId = reqIdMatch ? reqIdMatch[0].toUpperCase() : null;
+      const targetReqId = reqIdMatch ? reqIdMatch[0] : null;
       if (targetReqId) {
         const { result, error } = await this.executeTool('get_request_details', { requestId: targetReqId }, user, organizationId);
         toolResults.push({ tool: 'get_request_details', parameters: { requestId: targetReqId }, result: result || undefined, error: error || undefined });
@@ -654,15 +660,23 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
       }
     }
 
-    // 2. Pending approvals
-    if (q.includes('approval') || q.includes('pending sign') || q.includes('approve')) {
+    // 2. Pending approvals & endorsements
+    if (
+      q.includes('approval') ||
+      q.includes('endorse') ||
+      q.includes('sign-off') ||
+      q.includes('pending sign') ||
+      q.includes('approve') ||
+      q.includes('waiting for my review') ||
+      (q.includes('awaiting') && (q.includes('request') || q.includes('endorsement') || q.includes('decision')))
+    ) {
       const { result, error } = await this.executeTool('get_pending_approvals', {}, user, organizationId);
       toolResults.push({ tool: 'get_pending_approvals', parameters: {}, result: result || undefined, error: error || undefined });
       if (error) return { answer: error.startsWith('Access Denied') ? error : `Access Denied: ${error}`, toolResults };
 
       if (!result.approvals || result.approvals.length === 0) {
         return {
-          answer: 'There are currently no requests awaiting approval in your queue. All workflows are up to date.',
+          answer: 'There are currently no requests awaiting endorsement or approval in your queue. All operational workflows are up to date.',
           toolResults
         };
       }
@@ -674,8 +688,37 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
       }).join('\n');
 
       return {
-        answer: `There are currently ${result.count} request(s) awaiting approval in your queue:\n\n${approvalList}`,
+        answer: `There are currently ${result.count} request(s) awaiting endorsement and approval in your queue:\n\n${approvalList}`,
         toolResults
+      };
+    }
+
+    // 2.5 Blockers and Bottlenecks
+    if (q.includes('block') || q.includes('bottleneck') || q.includes('stuck') || q.includes('overdue')) {
+      const allRequests = await requestRepository.findAll(organizationId);
+      const visible = allRequests.filter(r => canUserAccessRequest(user, r));
+      const now = new Date();
+      const blocked = visible.filter(r => r.status === 'WAITING' || !!r.waitingOn);
+      const overdue = visible.filter(r => r.dueDate && new Date(r.dueDate) < now && r.status !== 'COMPLETED');
+
+      const parts: string[] = [];
+      if (blocked.length > 0) {
+        parts.push(`There are ${blocked.length} request(s) currently paused on external blockers:\n` +
+          blocked.slice(0, 5).map((r, i) => `${i + 1}. Request ${r.requestId} ("${(r.title || '').replace(/&/g, 'and')}") in ${r.departmentName}: waiting on ${r.waitingOn || 'external sign-off'}`).join('\n')
+        );
+      } else {
+        parts.push('No requests are currently paused on blockers.');
+      }
+
+      if (overdue.length > 0) {
+        parts.push(`There are ${overdue.length} overdue request(s):\n` +
+          overdue.slice(0, 5).map((r, i) => `${i + 1}. Request ${r.requestId} ("${(r.title || '').replace(/&/g, 'and')}") in ${r.departmentName}: due ${new Date(r.dueDate!).toLocaleDateString()}`).join('\n')
+        );
+      }
+
+      return {
+        answer: parts.join('\n\n'),
+        toolResults: [{ tool: 'get_operational_bottlenecks', parameters: { blockedCount: blocked.length, overdueCount: overdue.length } }]
       };
     }
 
@@ -783,9 +826,9 @@ ${allDepts.map(d => `- ${d.name.replace(/&/g, 'and')} (${d.code}): ${d.descripti
       }
     }
 
-    // 6. Org overview for admins
-    if ((q.includes('overview') || q.includes('organization') || q.includes('all department') || q.includes('system status')) &&
-        (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN')) {
+    // 6. Org overview for admins and deans
+    if ((q.includes('overview') || q.includes('organization') || q.includes('all department') || q.includes('system status') || q.includes('operational throughput')) &&
+        (user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN' || user.role === 'DEAN')) {
       const { result, error } = await this.executeTool('get_organization_overview', {}, user, organizationId);
       toolResults.push({ tool: 'get_organization_overview', parameters: {}, result: result || undefined, error: error || undefined });
       if (!error && result) {

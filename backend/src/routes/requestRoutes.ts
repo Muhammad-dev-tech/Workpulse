@@ -44,7 +44,27 @@ router.get('/radar', requireAuthentication, async (req: AuthenticatedRequest, re
   const active = visibleRequests.filter(r => r.status !== 'COMPLETED' && r.status !== 'CANCELLED');
   const overdue = active.filter(r => r.dueDate && new Date(r.dueDate) < now);
   const waiting = active.filter(r => r.status === 'WAITING' || !!r.waitingOn);
-  const pendingApprovals = active.filter(r => r.status === 'PENDING_APPROVAL');
+  const pendingApprovals = active.filter(r => {
+    if (r.status !== 'PENDING_APPROVAL') return false;
+    if (user.role === 'DEAN') {
+      const pendingApproval = r.approvals?.find(a => a.status === 'PENDING');
+      if (pendingApproval) {
+        return pendingApproval.stepId === 'approval-dean' || pendingApproval.stepId === 'tier-2-dean' || pendingApproval.approverId === user.id;
+      }
+      return r.currentStepName?.toLowerCase().includes('dean');
+    }
+    if (user.role === 'MANAGER') {
+      const pendingApproval = r.approvals?.find(a => a.status === 'PENDING');
+      if (pendingApproval) {
+        return pendingApproval.stepId === 'tier-1-dept-manager' || pendingApproval.stepId === 'approval-manager' || pendingApproval.approverId === user.id;
+      }
+      return r.currentStepName?.toLowerCase().includes('manager') || r.currentStepName?.toLowerCase().includes('hod');
+    }
+    if (user.role === 'EMPLOYEE' || user.role === 'OPERATOR') {
+      return r.approvals?.some(a => a.status === 'PENDING' && a.approverId === user.id);
+    }
+    return true;
+  });
   const assignedToMe = active.filter(
     r => r.assigneeId === user.id || (r.tasks && r.tasks.some(t => t.assigneeId === user.id))
   );
@@ -637,17 +657,33 @@ router.post('/:id/approvals/:approvalId', requireAuthentication, async (req: Aut
   const isDean = user.role === 'DEAN';
   const isDeptManager = user.role === 'MANAGER' && (!user.departmentId || user.departmentId === request.departmentId);
 
-  const currentApproval = request.approvals?.find(a => a.id === approvalId);
-  const stepId = currentApproval?.stepId || '';
+  let currentApproval = request.approvals?.find(a => a.id === approvalId);
+  if (!currentApproval) {
+    // If approvalId is a stepId like 'approval-dean', 'tier-2-dean', 'approval-manager', etc.
+    currentApproval = request.approvals?.find(a =>
+      a.status === 'PENDING' && (
+        a.stepId === approvalId ||
+        (isDean && (a.stepId === 'approval-dean' || a.stepId === 'tier-2-dean' || request.approvalPolicy === 'DEAN')) ||
+        (isDeptManager && (a.stepId === 'approval-manager' || a.stepId === 'tier-1-dept-manager' || request.approvalPolicy === 'DEPT_MANAGER')) ||
+        (isSuperAdmin)
+      )
+    );
+    if (!currentApproval) {
+      currentApproval = request.approvals?.find(a => a.status === 'PENDING');
+    }
+  }
+
+  const effectiveApprovalId = currentApproval?.id || approvalId;
+  const stepId = currentApproval?.stepId || (approvalId.startsWith('tier-') || approvalId.startsWith('approval-') ? approvalId : '');
 
   let isAuthorized = false;
   if (isSuperAdmin) {
     isAuthorized = true; // Top executive has ultimate authority and signs the final step
   } else if (currentApproval?.approverId === user.id) {
     isAuthorized = true; // Explicitly assigned approver
-  } else if (isDean && (stepId === 'tier-2-dean' || stepId === 'approval-dean' || request.approvalPolicy === 'DEAN' || request.approvalPolicy === 'EXECUTIVE_ONLY')) {
+  } else if (isDean && (stepId === 'tier-2-dean' || stepId === 'approval-dean' || request.approvalPolicy === 'DEAN' || request.approvalPolicy === 'EXECUTIVE_ONLY' || request.approvalPolicy === 'MULTI_TIER_CHAIN' || !request.approvalPolicy)) {
     isAuthorized = true;
-  } else if (isDeptManager && (stepId === 'tier-1-dept-manager' || stepId === 'approval-manager' || request.approvalPolicy === 'DEPT_MANAGER')) {
+  } else if (isDeptManager && (stepId === 'tier-1-dept-manager' || stepId === 'approval-manager' || request.approvalPolicy === 'DEPT_MANAGER' || request.approvalPolicy === 'MULTI_TIER_CHAIN')) {
     isAuthorized = true;
   }
 
@@ -659,10 +695,22 @@ router.post('/:id/approvals/:approvalId', requireAuthentication, async (req: Aut
     return;
   }
 
-  const updatedApproval = await requestRepository.updateApproval(orgId, request.requestId, approvalId, decision, notes);
+  const updatedApproval = await requestRepository.updateApproval(orgId, request.requestId, effectiveApprovalId, decision, notes);
   if (!updatedApproval) {
     res.status(404).json({ success: false, error: { code: 'APPROVAL_NOT_FOUND', message: 'Approval record not found.' } });
     return;
+  }
+
+  // Automatically dismiss / mark as read any pending approval notification for this user regarding this request
+  try {
+    const userNotifs = await notificationRepository.getUserNotifications(user.id);
+    for (const notif of userNotifs) {
+      if (!notif.read && (notif.link === request.requestId || notif.link === request.id || notif.title.toLowerCase().includes('approval required'))) {
+        await notificationRepository.markAsRead(notif.id, user.id);
+      }
+    }
+  } catch (notifErr) {
+    console.error('Failed to dismiss user approval notification:', notifErr);
   }
 
   const terms = await loadTerms(orgId);

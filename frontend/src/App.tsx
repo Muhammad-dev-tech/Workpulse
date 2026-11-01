@@ -48,6 +48,7 @@ export const App: React.FC = () => {
   const [currentOrgScope, setCurrentOrgScopeState] = useState<string>(() => api.getActiveOrgScope() || 'ALL');
   const [availableOrgs, setAvailableOrgs] = useState<Array<{ id: string; name: string; orgType?: string }>>([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   // Modals & Panels State
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
@@ -165,6 +166,7 @@ export const App: React.FC = () => {
       setTasks(taskData);
       setDepartments(deptData);
       setFaculties(facultiesData || []);
+      setRefreshCounter(c => c + 1);
 
       if (selectedRequestId) {
         const updated = await api.getRequestById(selectedRequestId);
@@ -201,8 +203,22 @@ export const App: React.FC = () => {
     if (currentTab === 'my-requests') {
       if (r.requesterId !== currentUser?.id) return false;
     }
-    if (currentTab === 'approvals') {
+    if (currentTab === 'approvals' || radarFilter === 'approvals') {
       if (r.status !== 'PENDING_APPROVAL') return false;
+      if (currentUser?.role === 'DEAN') {
+        const pendingApproval = r.approvals?.find(a => a.status === 'PENDING');
+        if (pendingApproval) {
+          return pendingApproval.stepId === 'approval-dean' || pendingApproval.stepId === 'tier-2-dean' || pendingApproval.approverId === currentUser.id;
+        }
+        return r.currentStepName?.toLowerCase().includes('dean') || false;
+      }
+      if (currentUser?.role === 'MANAGER') {
+        const pendingApproval = r.approvals?.find(a => a.status === 'PENDING');
+        if (pendingApproval) {
+          return pendingApproval.stepId === 'tier-1-dept-manager' || pendingApproval.stepId === 'approval-manager' || pendingApproval.approverId === currentUser.id;
+        }
+        return r.currentStepName?.toLowerCase().includes('manager') || r.currentStepName?.toLowerCase().includes('hod') || false;
+      }
     }
 
     if (radarFilter === 'overdue') {
@@ -211,9 +227,6 @@ export const App: React.FC = () => {
     }
     if (radarFilter === 'waiting') {
       return r.status === 'WAITING' || !!r.waitingOn;
-    }
-    if (radarFilter === 'approvals') {
-      return r.status === 'PENDING_APPROVAL';
     }
     if (radarFilter === 'assigned-me') {
       return r.assigneeId === currentUser?.id || (r.tasks && r.tasks.some(t => t.assigneeId === currentUser?.id));
@@ -292,6 +305,7 @@ export const App: React.FC = () => {
         onToggleMobileMenu={() => setMobileMenuOpen(prev => !prev)}
         mobileMenuOpen={mobileMenuOpen}
         onProfileUpdated={handleProfileUpdated}
+        refreshTrigger={refreshCounter}
       />
 
       <div className="flex flex-1 min-h-0">
@@ -373,8 +387,8 @@ export const App: React.FC = () => {
                 </span>
               )}
 
-              {currentTab !== 'audit' && currentTab !== 'tasks' && currentTab !== 'departments' && currentTab !== 'workflows' && currentTab !== 'members' && (
-                <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+              {currentTab !== 'audit' && currentTab !== 'tasks' && currentTab !== 'departments' && currentTab !== 'workflows' && currentTab !== 'members' && filteredRequests.length > 0 && (
+                <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full font-semibold">
                   {filteredRequests.length}
                 </span>
               )}

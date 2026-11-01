@@ -123,7 +123,13 @@ export const PulseAiDrawer: React.FC<PulseAiDrawerProps> = ({
 
     try {
       const history = messages.map(m => ({ role: m.role, content: m.content }));
-      const response = await api.queryPulseAi(q, history);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Pulse AI request timed out. Please try again.')), 12000)
+      );
+      const response = await Promise.race([
+        api.queryPulseAi(q, history),
+        timeoutPromise
+      ]);
 
       const aiMsg: PulseAiMessage = {
         id: `ai-${Date.now()}`,
