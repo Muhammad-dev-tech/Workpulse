@@ -53,3 +53,6 @@ export const wipeOrgData = async (organizationId: string, options: { wipeDepartm
   }
 };
 
+export { useSupabase };
+export { getSupabaseClient } from './supabaseStore';
+

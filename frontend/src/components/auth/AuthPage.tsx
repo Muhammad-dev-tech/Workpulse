@@ -16,7 +16,9 @@ import {
   Activity,
   KeyRound,
   ArrowLeft,
-  Copy
+  Copy,
+  MailCheck,
+  Send
 } from 'lucide-react';
 import { ORG_TYPE_OPTIONS, OrganizationType, getTerminology, inferOrgTypeFromName } from '../../terminology';
 
@@ -40,11 +42,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [successInfo, setSuccessInfo] = useState<string | null>(null);
 
   // Forgot password state
-  const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
+  const [forgotStep, setForgotStep] = useState<'request' | 'sent' | 'reset'>('request');
   const [forgotEmail, setForgotEmail] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
-  const [receivedCode, setReceivedCode] = useState<string | null>(null);
-  const [codeCopied, setCodeCopied] = useState(false);
+  const [recoveryAccessToken, setRecoveryAccessToken] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -68,6 +70,40 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
   const createTerms = getTerminology(orgType, orgName);
   const joinTerms = getTerminology(availableOrgs.find(o => o.id === selectedOrgId)?.orgType);
+
+  // Automatically detect incoming Supabase password reset links
+  useEffect(() => {
+    try {
+      const hashStr = window.location.hash.replace(/^#/, '');
+      const hashParams = new URLSearchParams(hashStr);
+      const searchParams = new URLSearchParams(window.location.search);
+
+      const accessToken = hashParams.get('access_token');
+      const type = hashParams.get('type') || searchParams.get('type');
+      const action = searchParams.get('action');
+
+      if (type === 'recovery' || action === 'reset-password' || accessToken) {
+        setTab('forgot');
+        setForgotStep('reset');
+        if (accessToken) {
+          setRecoveryAccessToken(accessToken);
+        }
+        setError(null);
+        setSuccessInfo('Password reset link verified. Please enter your new password.');
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Cooldown countdown for resending reset email
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldown]);
 
   useEffect(() => {
     loadOrganizations();
@@ -110,12 +146,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     }
   }, [selectedOrgId, orgMode]);
 
-  const handleCopyCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCodeCopied(true);
-    setTimeout(() => setCodeCopied(false), 2000);
-  };
-
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!forgotEmail.trim()) {
@@ -128,14 +158,27 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
     try {
       const res = await api.forgotPassword(forgotEmail.trim());
-      if (res.recoveryCode) {
-        setReceivedCode(res.recoveryCode);
-        setRecoveryCode(res.recoveryCode);
-      }
-      setSuccessInfo(res.message || 'Recovery code generated successfully.');
-      setForgotStep('reset');
+      setSuccessInfo(res.message);
+      setForgotStep('sent');
+      setResendCooldown(60);
     } catch (err: any) {
-      setError(err.message || 'Could not initiate password reset.');
+      setError(err.message || 'Could not dispatch password reset email.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendEmail = async () => {
+    if (resendCooldown > 0 || !forgotEmail.trim() || loading) return;
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await api.forgotPassword(forgotEmail.trim());
+      setSuccessInfo(res.message);
+      setResendCooldown(60);
+    } catch (err: any) {
+      setError(err.message || 'Could not resend email.');
     } finally {
       setLoading(false);
     }
@@ -143,16 +186,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!forgotEmail.trim()) {
-      setError('Email address is required.');
-      return;
-    }
-    if (!recoveryCode.trim()) {
-      setError('6-digit recovery code is required.');
+    if (!recoveryAccessToken && !recoveryCode.trim()) {
+      setError('Recovery code or verification link is required.');
       return;
     }
     if (!newPassword || newPassword.length < 6) {
-      setError('New password must be at least 6 characters.');
+      setError('New password must be at least 6 characters long.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -166,17 +205,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
     try {
       const res = await api.resetPassword({
-        email: forgotEmail.trim(),
-        code: recoveryCode.trim(),
+        accessToken: recoveryAccessToken || undefined,
+        email: forgotEmail ? forgotEmail.trim() : undefined,
+        code: recoveryCode ? recoveryCode.trim() : undefined,
         newPassword
       });
+
+      // Clear URL hash & params cleanly
+      window.history.replaceState({}, document.title, window.location.pathname);
+
       setTab('login');
-      setLoginEmail(forgotEmail.trim());
+      if (forgotEmail) setLoginEmail(forgotEmail.trim());
       setLoginPassword('');
       setSuccessInfo(res.message || 'Password reset successfully! Please sign in with your new password.');
       setForgotStep('request');
-      setReceivedCode(null);
       setRecoveryCode('');
+      setRecoveryAccessToken(null);
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
@@ -342,7 +386,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                       setError(null);
                       setSuccessInfo(null);
                       setForgotStep('request');
-                      setReceivedCode(null);
+                      setRecoveryCode('');
+                      setRecoveryAccessToken(null);
                     }}
                     className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:underline transition"
                   >
@@ -391,121 +436,184 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                   <span>Back to Sign In</span>
                 </button>
                 <span className="text-[11px] font-medium text-slate-400">
-                  {forgotStep === 'request' ? 'Step 1 of 2' : 'Step 2 of 2'}
+                  {forgotStep === 'request'
+                    ? 'Step 1 of 2'
+                    : forgotStep === 'sent'
+                    ? 'Email Dispatched'
+                    : 'Set New Password'}
                 </span>
               </div>
 
-              <div>
-                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                  {forgotStep === 'request' ? 'Reset your password' : 'Enter recovery code'}
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  {forgotStep === 'request'
-                    ? 'Enter your registered email address to receive a 6-digit recovery code.'
-                    : 'Enter the 6-digit code and choose a new password for your account.'}
-                </p>
-              </div>
+              {/* State 1: Request Password Reset Link */}
+              {forgotStep === 'request' && (
+                <div className="space-y-3.5">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Forgot your password?
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Enter your registered email address and we'll send you a secure link to reset your password.
+                    </p>
+                  </div>
 
-              {/* Code Display Banner (for dev/demo visibility) */}
-              {receivedCode && (
-                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/40 p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
-                      <KeyRound className="h-3.5 w-3.5" />
-                      6-Digit Recovery Code
-                    </span>
+                  <form onSubmit={handleRequestCode} className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Registered Email
+                      </label>
+                      <div className="relative">
+                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                          <Mail className="h-3.5 w-3.5 text-slate-400" />
+                        </div>
+                        <input
+                          type="email"
+                          required
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          placeholder="name@company.com"
+                          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
                     <button
-                      type="button"
-                      onClick={() => handleCopyCode(receivedCode)}
-                      className="inline-flex items-center gap-1 rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50 transition shadow-2xs"
+                      type="submit"
+                      disabled={loading}
+                      className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 px-4 text-xs font-semibold text-white shadow-xs transition disabled:opacity-50 mt-2 flex items-center justify-center gap-1.5"
                     >
-                      {codeCopied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3 text-slate-500" />}
-                      <span>{codeCopied ? 'Copied' : 'Copy'}</span>
+                      {loading ? (
+                        <>
+                          <div className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Sending link...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="h-3.5 w-3.5" />
+                          <span>Send Password Reset Link</span>
+                        </>
+                      )}
                     </button>
-                  </div>
-                  <div className="text-2xl font-mono font-black tracking-widest text-emerald-700 dark:text-emerald-300 text-center py-1 select-all">
-                    {receivedCode}
-                  </div>
-                  <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400 text-center">
-                    Code expires in 15 minutes. Automatically populated into the form below.
-                  </p>
+                  </form>
                 </div>
               )}
 
-              {forgotStep === 'request' ? (
-                <form onSubmit={handleRequestCode} className="space-y-3.5">
+              {/* State 2: Email Dispatched Screen */}
+              {forgotStep === 'sent' && (
+                <div className="text-center py-2 space-y-4">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 ring-4 ring-emerald-50 dark:ring-emerald-950/30">
+                    <MailCheck className="h-6 w-6" />
+                  </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      Registered Email
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                        <Mail className="h-3.5 w-3.5 text-slate-400" />
-                      </div>
-                      <input
-                        type="email"
-                        required
-                        value={forgotEmail}
-                        onChange={(e) => setForgotEmail(e.target.value)}
-                        placeholder="name@company.com"
-                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
-                      />
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                      Check your email
+                    </h2>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 max-w-xs mx-auto">
+                      We've sent a secure password reset link to{' '}
+                      <span className="font-semibold text-slate-900 dark:text-white">{forgotEmail}</span>.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 p-3 text-left text-[11px] text-slate-500 dark:text-slate-400 space-y-1">
+                    <div className="font-semibold text-slate-700 dark:text-slate-200">Next steps:</div>
+                    <div>1. Open the email in your inbox.</div>
+                    <div>2. Click the <strong>Reset Password</strong> button or link.</div>
+                    <div>3. The link will open WorkPulse so you can set your new password.</div>
+                    <div className="pt-1 text-[10px] text-slate-400">
+                      * Link is valid for 15 minutes. Check your spam/junk folder if not received.
                     </div>
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 px-4 text-xs font-semibold text-white shadow-xs transition disabled:opacity-50 mt-2"
-                  >
-                    {loading ? 'Generating code...' : 'Generate Recovery Code'}
-                  </button>
-                </form>
-              ) : (
+                  <div className="space-y-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleResendEmail}
+                      disabled={loading || resendCooldown > 0}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2 px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition disabled:opacity-50"
+                    >
+                      {resendCooldown > 0
+                        ? `Resend email in ${resendCooldown}s`
+                        : loading
+                        ? 'Resending...'
+                        : 'Resend email'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotStep('reset');
+                        setError(null);
+                      }}
+                      className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline font-medium block mx-auto pt-1"
+                    >
+                      Have a reset token / OTP code? Enter it manually
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* State 3: Set New Password Form */}
+              {forgotStep === 'reset' && (
                 <form onSubmit={handleResetPassword} className="space-y-3.5">
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                        Account Email
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setForgotStep('request');
-                          setError(null);
-                        }}
-                        className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
-                      >
-                        Change email
-                      </button>
-                    </div>
-                    <input
-                      type="email"
-                      disabled
-                      value={forgotEmail}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/40 py-2 px-3 text-xs text-slate-500 dark:text-slate-400 cursor-not-allowed select-none"
-                    />
+                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Choose a new password
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      {recoveryAccessToken
+                        ? 'Your password reset token has been verified. Enter your new password below.'
+                        : 'Enter your recovery code and choose a new password.'}
+                    </p>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      6-Digit Recovery Code
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                        <KeyRound className="h-3.5 w-3.5 text-slate-400" />
+                  {/* If entering manually without access token */}
+                  {!recoveryAccessToken && (
+                    <>
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                            Account Email
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForgotStep('request');
+                              setError(null);
+                            }}
+                            className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
+                          >
+                            Change email
+                          </button>
+                        </div>
+                        <input
+                          type="email"
+                          required
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          placeholder="name@company.com"
+                          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
+                        />
                       </div>
-                      <input
-                        type="text"
-                        required
-                        maxLength={6}
-                        value={recoveryCode}
-                        onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, ''))}
-                        placeholder="123456"
-                        className="w-full font-mono tracking-widest rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                          Recovery Code / Reset Token
+                        </label>
+                        <div className="relative">
+                          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                            <KeyRound className="h-3.5 w-3.5 text-slate-400" />
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            value={recoveryCode}
+                            onChange={(e) => setRecoveryCode(e.target.value.trim())}
+                            placeholder="Enter 6-digit code or reset token"
+                            className="w-full font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-2 pl-9 pr-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-emerald-600 dark:focus:border-emerald-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <div>
                     <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -548,9 +656,19 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 px-4 text-xs font-semibold text-white shadow-xs transition disabled:opacity-50 mt-2"
+                    className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 px-4 text-xs font-semibold text-white shadow-xs transition disabled:opacity-50 mt-2 flex items-center justify-center gap-1.5"
                   >
-                    {loading ? 'Resetting password...' : 'Set New Password & Sign In'}
+                    {loading ? (
+                      <>
+                        <div className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Resetting password...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-3.5 w-3.5" />
+                        <span>Set New Password & Sign In</span>
+                      </>
+                    )}
                   </button>
                 </form>
               )}

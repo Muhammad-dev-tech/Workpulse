@@ -157,8 +157,10 @@ export const api = {
   },
 
   async resetPassword(payload: {
-    email: string;
-    code: string;
+    email?: string;
+    code?: string;
+    token?: string;
+    accessToken?: string;
     newPassword: string;
   }): Promise<{ success: boolean; message: string }> {
     const res = await apiFetch('/api/auth/reset-password', {
