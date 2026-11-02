@@ -4,7 +4,7 @@
   "private": true,
   "description": "WorkPulse - Multi-tenant internal workflow and operational visibility platform with Pulse AI",
   "scripts": {
-    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,green\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev": "node dev.js",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
     "start": "npm --prefix backend start"
   },
